@@ -64,10 +64,13 @@ class TFIModel(CouplingMPOModel):
     def init_terms(self, model_params):
         J = np.asarray(model_params.get('J', 1.))
         g = np.asarray(model_params.get('g', 1.))
+        hx = np.asarray(model_params.get('hx', 0))
         for u in range(len(self.lat.unit_cell)):
-            self.add_onsite(-g, u, 'Sigmaz')
+            self.add_onsite(g, u, 'Sigmaz')
+        for u in range(len(self.lat.unit_cell)):
+            self.add_onsite(hx, 0, 'Sigmax')
         for u1, u2, dx in self.lat.pairs['nearest_neighbors']:
-            self.add_coupling(-J, u1, 'Sigmax', u2, 'Sigmax', dx)
+            self.add_coupling(J, u1, 'Sigmax', u2, 'Sigmax', dx)
         # done
 
 
