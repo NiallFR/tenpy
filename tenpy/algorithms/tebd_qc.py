@@ -24,6 +24,7 @@ class TEBDEngine_qc(TEBDEngine):
 
     @staticmethod
     def suzuki_trotter_decomposition(order, N_steps):
+        even, odd = 0, 1
         if N_steps == 0:
             return []
         if order == 1:
@@ -36,7 +37,22 @@ class TEBDEngine_qc(TEBDEngine):
             b = (1, 0)  # dt
             c = (1, 1)  # dt
             return [a, h, b, h] + [c, h, b, h] * (N_steps - 1) + [a]
-
+        elif order == 4:
+            a = (0, odd)  # t1/2
+            a2 = (1, odd)  # t1
+            b = (1, even)  # t1
+            c = (2, odd)  # (t1 + t3) / 2 == (1 - 3 * t1)/2
+            d = (3, even)  # t3 = 1 - 4 * t1
+            # From Schollwoeck 2011 (:arxiv:`1008.3477`):
+            # U = U(t1) U(t2) U(t3) U(t2) U(t1)
+            # with U(dt) = U(dt/2, odd) U(dt, even) U(dt/2, odd) and t1 == t2
+            # Using above definitions, we arrive at:
+            # U = [a b a2 b c d c b a2 b a] * N
+            #   = [a b a2 b c d c b a2 b] + [a2 b a2 b c d c b a2 b a] * (N-1) + [a]
+            steps = [a, b, a2, b, c, d, c, b, a2, b]
+            steps = steps + [a2, b, a2, b, c, d, c, b, a2, b] * (N_steps - 1)
+            steps = steps + [a]
+            return steps
 
 
     def calc_U(self, order, delta_t, type_evo='real', E_offset=None):
@@ -56,17 +72,25 @@ class TEBDEngine_qc(TEBDEngine):
 
         L = self.psi.L
         self._U = []
-        for bond_type in ['half_time', 'full_time', 'mag']:
-            if bond_type == 'mag' or bond_type == 'half_time':
-                dt = 0.5
-            elif bond_type == 'full_time':
-                dt = 1.0
-            else:
-                NotImplementedError("bond type must be half_time, full_time or mag")
-            U_bond = [
-                self._calc_U_bond(i_bond, bond_type, dt * delta_t, type_evo, E_offset) for i_bond in range(L)
-            ]
-            self._U.append(U_bond)
+        if order == 2:
+            for bond_type in ['half_time', 'full_time', 'mag']:
+                if bond_type == 'mag' or bond_type == 'half_time':
+                    dt = 0.5
+                elif bond_type == 'full_time':
+                    dt = 1.0
+                else:
+                    NotImplementedError("bond type must be half_time, full_time or mag")
+                U_bond = [
+                    self._calc_U_bond_order2(i_bond, bond_type, dt * delta_t, type_evo, E_offset) for i_bond in range(L)
+                ]
+                self._U.append(U_bond)
+
+        elif order == 4:
+            for dt in self.suzuki_trotter_time_steps(order):
+                U_bond = [
+                    self._calc_U_bond(i_bond, dt * delta_t, type_evo, E_offset) for i_bond in range(L)
+                ]
+                self._U.append(U_bond)
 
         # for dt in self.suzuki_trotter_time_steps(order):
         #     U_bond = [
@@ -75,7 +99,7 @@ class TEBDEngine_qc(TEBDEngine):
         #     self._U.append(U_bond)
         self.force_prepare_evolve = False
 
-    def _calc_U_bond(self, i_bond, bond_type, dt, type_evo, E_offset):
+    def _calc_U_bond_order2(self, i_bond, bond_type, dt, type_evo, E_offset):
         """Calculate exponential of a bond Hamitonian.
 
         * ``U_bond = exp(-i dt (H_bond-E_offset_bond))`` for ``type_evo='real'``, or
