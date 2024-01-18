@@ -7,11 +7,10 @@ and yet powerful enough for day-to-day research.
 """
 # Copyright 2018-2023 TeNPy Developers, GNU GPLv3
 # This file marks this directory as a python package.
-​
+
 import warnings
 import logging
 logger = logging.getLogger(__name__)  # main logger for tenpy
-​
 # load and provide subpackages on first input
 # note that the order matters!
 from . import tools
@@ -22,26 +21,24 @@ from . import models
 from . import simulations
 from . import version  # needs to be after linalg!
 from .simulations.simulation import run_simulation, resume_from_checkpoint, run_seq_simulations
-​
+
 #: hard-coded version string
 __version__ = version.version
-​
+
 #: full version from git description, and numpy/scipy/python versions
 __full_version__ = version.full_version
-​
+
 __all__ = [
     "algorithms", "linalg", "models", "networks", "simulations", "tools", "version", "show_config",
     "run_simulation", "resume_from_checkpoint", "run_seq_simulations", "console_main"
 ]
-​
-​
+
 def show_config():
     """Print information about the version of tenpy and used libraries.
     The information printed is :attr:`tenpy.version.version_summary`.
     """
     print(version.version_summary)
-​
-​
+
 def console_main(*command_line_args):
     """Command line interface.
     For the python interface see :func:`~tenpy.simulations.simulation.run_simulation` and
@@ -59,7 +56,7 @@ def console_main(*command_line_args):
     import sys
     import importlib
     parser = _setup_arg_parser()
-​
+
     args = parser.parse_args(args=command_line_args if command_line_args else None)
     # import extra modules
     context = {'tenpy': globals(), 'np': np, 'scipy': scipy}
@@ -98,12 +95,11 @@ def console_main(*command_line_args):
         run_simulation(**options)
     else:
         run_seq_simulations(**options)
-​
-​
+
 def _setup_arg_parser(width=None):
     import argparse
     import textwrap
-​
+
     desc = "Command line interface to run a TeNPy simulation."
     epilog = textwrap.dedent("""\
     Examples
@@ -117,13 +113,13 @@ def _setup_arg_parser(width=None):
         tenpy-run my_params.yml -o output_filename '"rerun_Jz_2.h5"' -o model_params.Jz 2.
     Note that string values for the options require double quotes on the command line.
     """)
-​
+
     def formatter(prog):
         return argparse.RawDescriptionHelpFormatter(prog,
                                                     indent_increment=4,
                                                     max_help_position=8,
                                                     width=width)
-​
+
     parser = argparse.ArgumentParser(description=desc, epilog=epilog, formatter_class=formatter)
     parser.add_argument('--import-module',
                         '-i',
