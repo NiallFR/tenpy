@@ -1238,6 +1238,85 @@ class SpinHalfSite(Site):
         """Debug representation of self."""
         return "SpinHalfSite({c!r})".format(c=self.conserve)
 
+class SpinHalfSite2(Site):
+    r"""Spin-1/2 site.
+
+    Local states are ``up`` (0) and ``down`` (1).
+    Local operators are the usual spin-1/2 operators, e.g. ``Sz = [[0.5, 0.], [0., -0.5]]``,
+    ``Sx = 0.5*sigma_x`` for the Pauli matrix `sigma_x`.
+
+    =========================== ================================================
+    operator                    description
+    =========================== ================================================
+    ``Id, JW``                  Identity :math:`\mathbb{1}`
+    ``Sx, Sy, Sz``              Spin components :math:`S^{x,y,z}`,
+                                equal to half the Pauli matrices.
+    ``Sigmax, Sigmay, Sigmaz``  Pauli matrices :math:`\sigma^{x,y,z}`
+    ``Sp, Sm``                  Spin flips :math:`S^{\pm} = S^{x} \pm i S^{y}`
+    =========================== ================================================
+
+    ============== ====  ============================
+    `conserve`     qmod  *excluded* onsite operators
+    ============== ====  ============================
+    ``'Sz'``       [1]   ``Sx, Sy, Sigmax, Sigmay``
+    ``'parity'``   [2]   --
+    ``'None'``     []    --
+    ============== ====  ============================
+
+    Parameters
+    ----------
+    conserve : str | None
+        Defines what is conserved, see table above.
+    sort_charge : bool
+        Whether :meth:`sort_charge` should be called at the end of initialization.
+        This is usually a good idea to reduce potential overhead when using charge conservation.
+        Note that this permutes the order of the local basis states!
+        For backwards compatibility with existing data, it is not (yet) enabled by default.
+
+    Attributes
+    ----------
+    conserve : str
+        Defines what is conserved, see table above.
+    """
+
+    def __init__(self, phi, conserve='Sz', sort_charge=None):
+        if not conserve:
+            conserve = 'None'
+        if conserve not in ['Sz', 'parity', 'None']:
+            raise ValueError("invalid `conserve`: " + repr(conserve))
+        Sx = [[0., 0.5], [0.5, 0.]]
+        Rx = [[np.cos(phi), 1j * np.sin(phi)], [1j * np.sin(phi), np.cos(phi)]]
+        Sy = [[0., -0.5j], [+0.5j, 0.]]
+        Sz = [[0.5, 0.], [0., -0.5]]
+        Sp = [[0., 1.], [0., 0.]]  # == Sx + i Sy
+        Sm = [[0., 0.], [1., 0.]]  # == Sx - i Sy
+        ops = dict(Sp=Sp, Sm=Sm, Sz=Sz)
+        if conserve == 'Sz':
+            chinfo = npc.ChargeInfo([1], ['2*Sz'])
+            leg = npc.LegCharge.from_qflat(chinfo, [1, -1])
+        else:
+            ops.update(Sx=Sx, Sy=Sy, Rx=Rx)
+            if conserve == 'parity':
+                chinfo = npc.ChargeInfo([2], ['parity_Sz'])
+                leg = npc.LegCharge.from_qflat(chinfo, [1, 0])  # ([1, -1] would need ``qmod=[4]``)
+            else:
+                leg = npc.LegCharge.from_trivial(2)
+        self.conserve = conserve
+        # Specify Hermitian conjugates
+        Site.__init__(self, leg, ['up', 'down'], sort_charge=sort_charge, **ops)
+        # further alias for state labels
+        self.state_labels['-0.5'] = self.state_labels['down']
+        self.state_labels['0.5'] = self.state_labels['up']
+        # Add Pauli matrices
+        if conserve != 'Sz':
+            self.add_op('Sigmax', 2. * self.Sx)
+            self.add_op('Sigmay', 2. * self.Sy)
+        self.add_op('Sigmaz', 2. * self.Sz)
+
+    def __repr__(self):
+        """Debug representation of self."""
+        return "SpinHalfSite({c!r})".format(c=self.conserve)
+
 
 class SpinSite(Site):
     r"""General Spin S site.
