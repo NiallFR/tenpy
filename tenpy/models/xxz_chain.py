@@ -88,8 +88,8 @@ class XXZChain(CouplingModel, NearestNeighborModel, MPOModel):
         # see also the examples tenpy.models.model.CouplingModel.add_coupling
         self.add_coupling(Jz, 0, 'Sz', 0, 'Sz', 1)
         # 7) initialize H_MPO
-        print('commented out line that is necessary for DMRG')
-        # MPOModel.__init__(self, lat, self.calc_H_MPO())
+        #print('DMRG will not work if line below is commented out.')
+        MPOModel.__init__(self, lat, self.calc_H_MPO())
         # 8) initialize H_bond (the order of 7/8 doesn't matter)
         NearestNeighborModel.__init__(self, lat, self.calc_H_bond())
 

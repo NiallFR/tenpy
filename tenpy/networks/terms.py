@@ -740,6 +740,31 @@ class CouplingTerms(Hdf5Exportable):
             if H is not None:
                 H.iset_leg_labels(['p0', 'p0*', 'p1', 'p1*'])
         return H_bond
+    
+    def to_heavy_hex_bond_Arrays(self, sites, connections):
+        # Should return H_bond which is a dictionary with keys = connected qubits
+        # and values = the bonds themselves.
+        
+        L = self.L
+        if len(sites) != L:
+            raise ValueError("incompatible length")
+        #H_bond = [None] * len(connections)
+        H_bond = {}
+        term_list = self.to_TermList()
+        for term, strength in zip(term_list.terms, term_list.strength):
+            assert len(term) == 2
+            (op_i, i), (op_j, j) = term
+            site_i = sites[i]
+            site_j = sites[j]
+            H = strength * npc.outer(site_i.get_op(op_i), site_j.get_op(op_j))
+            if (i,j) in H_bond:
+                H = add_with_None_0(H_bond[(i,j)], H)
+            H_bond[(i,j)] = H
+            
+        for H in H_bond.values():
+            if H is not None:
+                H.iset_leg_labels(['p0', 'p0*', 'p1', 'p1*'])
+        return H_bond
 
     def remove_zeros(self, tol_zero=1.e-15):
         """Remove entries close to 0 from :attr:`coupling_terms`.
