@@ -2,7 +2,7 @@ import numpy as np
 from .lattice import Site, Chain
 from ..tools.params import asConfig
 from ..linalg import np_conserved as npc
-from ..networks.site import SpinHalfSite 
+from ..networks.site import SpinHalfSite, SpinHalfSite2
 from .model import CouplingModel, MPOModel, HeavyHexModel
 
 
@@ -12,11 +12,16 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
         L = model_params.get('L', 2)
         Jxx = model_params.get('Jxx', 1.)
         Jz = model_params.get('Jz', 1.)
+        phi = model_params.get('phi', 1.)
         
         bc_MPS = model_params.get('bc_MPS', 'finite')
         sort_charge = model_params.get('sort_charge', None)
+        conserve = model_params.get('conserve', None)
         # 1-3):
-        USE_PREDEFINED_SITE = False
+        if conserve is not None:
+            USE_PREDEFINED_SITE = False
+        else: 
+            USE_PREDEFINED_SITE = True
         if not USE_PREDEFINED_SITE:
             # 1) charges of the physical leg. The only time that we actually define charges!
             leg = npc.LegCharge.from_qflat(npc.ChargeInfo([1], ['2*Sz']), [1, -1])
@@ -30,7 +35,9 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
         else:
             # there is a site for spin-1/2 defined in TeNPy, so just we can just use it
             # replacing steps 1-3)
-            site = SpinHalfSite(conserve='Sz', sort_charge=sort_charge)
+            #site = SpinHalfSite(conserve='Sz', sort_charge=sort_charge)
+            site = SpinHalfSite2(phi, conserve='None', sort_charge=sort_charge)
+
             
         bc = 'open' if bc_MPS == 'finite' else 'periodic'
         lat = Chain(L, site, bc=bc, bc_MPS=bc_MPS)
@@ -73,7 +80,9 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
     
     
     def get_connections(self, L):
-        if L == 3:
+        if L == 2:
+            connections = [(0,1)]
+        elif L == 3:
             connections = [(0,2)]
             
         elif L == 4:
@@ -98,13 +107,45 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
                                 (9,10),(10,11),(11,12),(11,13),(12,23),
                                 (13,14),(14,15),(15,16),(16,17),(17,18),
                                 (18,19),(19,20),(20,21),(20,22),(22,23)]
+            
+        elif L == 125:
+            connections_layer1 = [(4, 5),(7, 8), (9, 10),(13, 14),(15, 16), (19, 21),(11, 22),
+             (23, 24),(26, 27),(29, 30),(1, 32),(33, 34),(35, 36),(37, 38),
+             (40, 41), (42, 43),(45, 46),(48, 49),(20, 51),(53, 54),(55, 56),
+             (57, 58),(59, 60), (61, 62),(64, 65),(67, 69),(39, 70),(72, 73),
+             (89, 90),(86, 88),(63, 84),(80, 81),(68, 79),(75, 76),(93, 94),
+             (95, 97),(98, 99),(82, 103),(100, 101),(104, 105),(107, 108),
+             (109, 110),(96, 124),(122, 123),(119, 120),(117, 118),(115, 116)]
+            
+            
+            connections_layer2 = [(0, 2),(3, 4),(5, 6),(8, 9),(10, 11),(12, 13),
+             (16, 17),(18, 19),(21, 22),(24, 25),(27, 28),(29, 31),(32, 33),
+             (38, 40),(30, 41),(43, 45),(44, 65),(46, 47),(48, 50),(49, 60),
+             (51, 52),(56, 57),(58, 89),(62, 64),(66, 67),
+             (69, 70),(71, 72),(73, 74),(76, 78),(77, 108),(79, 80),
+             (81, 82),(83, 84),(85, 86),(90, 91),(92, 93),(95, 96),
+             (87, 98),(99, 100),(102, 103),(105, 106),(110, 111),(112, 113),
+             (114, 115), (116, 117),(101, 120),(121, 122)]
+            
+            connections_layer3 = [(0, 1),(2, 3),(5, 7),(10, 12),(14, 15),(17, 18),(19, 20),(22, 23),
+             (24, 26),(6, 27),(28, 29),(31, 32),(34, 35),(36, 37),(38, 39),
+             (41, 42),(43, 44),(25, 46),(47, 48),(50, 51),(52, 53),(54, 55),
+             (57, 59),(60, 61),(62, 63),(65, 66),(67, 68),(70, 71),(74, 75),
+             (76, 77),(78, 79),(81, 83),(84, 85),(86, 87),(88, 89),(91, 92),
+             (94, 95),(97, 98),(100, 102),(103, 104),(105, 107),(108, 109),
+             (111, 112),(113, 114),(106, 116),(118, 119),(120, 121),(123, 124)]
+            
+            connections = connections_layer1 + connections_layer2 + connections_layer3
+
         else:
             raise NotImplementedError()
             
         return connections
             
     def get_layers(self, L):
-        if L == 3:
+        if L == 2:
+            layers = [[0]]
+        elif L == 3:
             layers = [[0]]
             
         elif L == 4:
@@ -123,6 +164,13 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
              layer1 = [0,3,7,9,11,14,19,21]
              layer2 = [1,5,8,10,13,16,18,20,23]
              layer3 = [2,4,6,12,15,17,22,24]
+             layers = [layer1, layer2, layer3]
+             
+        elif L == 125:
+             layer1 = [k for k in range(47)]
+             layer2 = [k for k in range(47,94)]
+             layer3 = [k for k in range(94,142)]
+
              layers = [layer1, layer2, layer3]
              
         return layers

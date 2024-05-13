@@ -31,7 +31,7 @@ class TEBDEngineHeavyHex(TEBDEngine):
 
         self._U = []
         
-        if self.psi.L == 3:
+        if self.psi.L == 3 or self.psi.L == 2:
             num_layers = 1
             
         elif self.psi.L == 6:
