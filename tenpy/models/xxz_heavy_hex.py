@@ -7,7 +7,7 @@ from .model import CouplingModel, MPOModel, HeavyHexModel
 
 
 class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
-    def __init__(self, model_params):
+    def __init__(self, model_params, ordering=None, layers=None):
         model_params = asConfig(model_params, "XXZChain")
         L = model_params.get('L', 2)
         Jxx = model_params.get('Jxx', 1.)
@@ -40,11 +40,15 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
 
             
         bc = 'open' if bc_MPS == 'finite' else 'periodic'
-        lat = Chain(L, site, bc=bc, bc_MPS=bc_MPS)
+        PEPS_MOD_2D=False
+        if not PEPS_MOD_2D:
+            lat = Chain(L, site, bc=bc, bc_MPS=bc_MPS)
+        else: #implement lattice model for 2d peps like tensor network
+            lat = 'to implement'
         # 5) initialize CouplingModel
         CouplingModel.__init__(self, lat)
         
-        connections = self.get_connections(L)
+        connections = self.get_connections(L,ordering,layers)
         self._connections = connections
         # Edit line below and loop over all heavy hex connectivities
         connection_no = 0
@@ -53,7 +57,7 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
             self.add_coupling_term(Jz[connection_no], i, j, 'Sz', 'Sz')
             connection_no += 1
 
-        self.layers = self.get_layers(L)
+        self.layers = self.get_layers(L, layers)
 
         HeavyHexModel.__init__(self, lat, self.calc_H_bond(connections))
         MPOModel.__init__(self, lat, self.calc_H_MPO())
@@ -79,7 +83,11 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
         return H_bond
     
     
-    def get_connections(self, L):
+    def get_connections(self, L, ordering, layers):
+
+        if layers != None:
+            connections=layers[0]+layers[1]+layers[2]
+            return connections
         if L == 2:
             connections = [(0,1)]
         elif L == 3:
@@ -137,12 +145,41 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
             
             connections = connections_layer1 + connections_layer2 + connections_layer3
 
+            if ordering != None:
+                print('Applying new ordering:')
+                print(ordering)
+                #can be optimized
+                new_connections = []
+                for c in connections:
+                    i=ordering.index(c[0])
+                    j=ordering.index(c[1])
+                    if i<j:
+                        new_connections.append((i,j))
+                    else:
+                        new_connections.append((j,i))
+                
+                connections = new_connections
+                print('New connections:')
+                print(connections)
+
         else:
             raise NotImplementedError()
             
         return connections
             
-    def get_layers(self, L):
+    def get_layers(self, L, layers=None):
+        if layers!=None:
+            # return a list of list of indices. The indices refers to the position
+            # of the connection in the connections list.
+            layers_list=[]
+            connect=0
+            for i in range(len(layers)):
+                layers_list.append([])
+                for j in range(len(layers[i])):
+                    layers_list[i].append(connect)
+                    connect+=1
+
+            return layers_list
         if L == 2:
             layers = [[0]]
         elif L == 3:
