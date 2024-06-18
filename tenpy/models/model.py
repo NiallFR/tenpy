@@ -263,7 +263,11 @@ class HeavyHexModel(Model):
                 self.dtype = Hb.dtype
                 break
         else:
-            raise ValueError("All H_bond are `None`!")
+            #raise ValueError("All H_bond are `None`!")
+            warnings.warn(
+                "All H_bond are `None`! Setting self.dtype to float64. Make sure this is intended behaviour.",
+                UserWarning, 2)
+            self.dtype = np.dtype('float64')
 
         
 

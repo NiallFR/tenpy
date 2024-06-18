@@ -275,7 +275,7 @@ class TEBDEngine(TimeEvolutionAlgorithm):
             steps = steps + [a]
             return steps
         elif order == '4_opt':
-            # symmetric: a1 b1 a2 b2 a3 b3 a2 b2 a2 b1 a1
+            # symmetric: a1 b1 a2 b2 a3 b3 a3 b2 a2 b1 a1
             steps = [(0, odd), (1, even), (2, odd), (3, even), (4, odd),  (5, even),
                      (4, odd), (3, even), (2, odd), (1, even), (0, odd)]  # yapf: disable
             return steps * N_steps

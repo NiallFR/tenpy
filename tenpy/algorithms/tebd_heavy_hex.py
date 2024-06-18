@@ -69,7 +69,37 @@ class TEBDEngineHeavyHex(TEBDEngine):
                 self._calc_U_bond(i_bond, 0.5*delta_t) for i_bond in self.model.layers[0]
                 ]
             self._U.append(U_bond_layer)
+
+        elif order == 4:
+            '''
+            (2k)th-order Suzuki formula S2k, defined recursively in eq 4, 5 of C.1, arXiv:1711.10980v1
+            defined for the first time in https://doi.org/10.1063/1.529425
+            H = H_1 + H_2 + ... + H_n
+            S_2(λ) := \Prod_{j=1}^n exp(Hjλ/2) \Prod_{j=n}^1 exp(Hjλ/2)
+            S_{2k}(λ) := [S_{2k-2}(p_k λ)]^2 S_{2k-2}((1 - 4p_k)λ)[S_{2k-2}(p_k λ)]^2
+            note that the square means to apply 2 times the operator.
+            p_k = 1/(4-4^{1/(2k-1)})
+            '''
             
+            p2 = 1. / (4. - 4.**(1 / 3.))
+            p = 1. - 4. * p2
+            coefs=[p2/2]
+            for _ in range(3):
+                coefs.extend([p2/2, p2])
+            coefs.extend([p2/2, (p2+p)/2, p/2, p, p/2, (p+p2)/2, p2/2])
+            for _ in range(3):
+                coefs.extend([p2, p2/2])
+            coefs.append(p2/2)
+
+            pattern=[0, 1, 2, 1]
+
+            for i, tk in enumerate(coefs):
+                ly=pattern[i%4]
+                U_bond_layer = [
+                    self._calc_U_bond(i_bond, tk*delta_t) for i_bond in self.model.layers[ly]
+                    ]
+                self._U.append(U_bond_layer)
+
         else:
             raise NotImplementedError()
         
@@ -97,7 +127,7 @@ class TEBDEngineHeavyHex(TEBDEngine):
         #for U_idx_dt, odd in self.suzuki_trotter_decomposition(order, N_steps):
         # for U_idx_dt, odd in self._decomp:
             
-            
+
         for layer_no in range(len(self._U)):
             trunc_err += self.evolve_step(layer_no)
                
@@ -125,6 +155,12 @@ class TEBDEngineHeavyHex(TEBDEngine):
             elif layer_no == 4:
                 layer_no = 0
             connection_numbers = self.model.layers[layer_no]
+        elif order == 4:
+            pattern=[0, 1, 2, 1]
+            connection_numbers = self.model.layers[pattern[layer_no%4]]
+        else:
+            raise NotImplementedError()
+            
         
         trunc_err = TruncationError()
         for k in range(len(Us)):
@@ -188,5 +224,12 @@ class TEBDEngineHeavyHex(TEBDEngine):
         
         return final_perm, a, b
         
-        
-        
+    
+class TEBDEngineHeavyHex_qc(TEBDEngineHeavyHex):
+    def __init__(self, psi, model, model2, options, **kwargs):
+        TimeEvolutionAlgorithm.__init__(self, psi, model, options, **kwargs)
+        self.model2 = model2
+        self._trunc_err_bonds = [TruncationError() for i in range(psi.L + 1)]
+        self._U = None
+        self._U_param = {}
+        self._update_index = None

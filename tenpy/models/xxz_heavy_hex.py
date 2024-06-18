@@ -73,6 +73,10 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
         ct = self.all_coupling_terms()
         ct.remove_zeros(tol_zero)
         H_bond = ct.to_heavy_hex_bond_Arrays(sites, connections)
+
+        # ot = self.all_onsite_terms()
+        # ot.remove_zeros(tol_zero)
+        # ot.add_to_nn_bond_Arrays(H_bond, sites, finite, distribute=(0.5, 0.5))
     
         if self.explicit_plus_hc:
             # self representes the terms of `ct` and `ot` + their hermitian conjugates
