@@ -1917,6 +1917,7 @@ class MPOGraph:
             return True
 
         if not infinite and any([ch is None for ch in charges[-1]]):
+            print(f"charges: {charges}")
             raise ValueError("can't determine all charges on the very right leg of the MPO!")
 
         max_checks = 1000  # Hard-coded since for a properly set-up MPO graph, this loop will

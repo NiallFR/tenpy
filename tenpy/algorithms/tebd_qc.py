@@ -107,6 +107,7 @@ class TEBDEngine_qc(TEBDEngine):
         """
 
         if bond_type == 'half_time' or bond_type == 'full_time':
+            print(f"from _calc_U_Bond_order2 self.model.H_bond: {self.model.H_bond}")
             h = self.model.H_bond[i_bond]
         elif bond_type == 'mag':
             h = self.model2.H_bond[i_bond]
