@@ -38,7 +38,7 @@ class TEBDEngineHeavyHex(TEBDEngine):
             num_layers = 2
             
         else:
-            num_layers = 3
+            num_layers = len(self.model.layers)
             
             
         if order == 1:
