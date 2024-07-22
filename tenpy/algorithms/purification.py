@@ -1,14 +1,13 @@
 """Algorithms for using Purification."""
 
-# Copyright 2019-2023 TeNPy Developers, GNU GPLv3
+# Copyright (C) TeNPy Developers, GNU GPLv3
 
 import numpy as np
 import logging
 logger = logging.getLogger(__name__)
 
-import tenpy.linalg.np_conserved as npc
+from ..linalg import np_conserved as npc
 from . import tebd
-from ..tools.params import asConfig
 from .mps_common import VariationalApplyMPO, TwoSiteH
 from .truncation import svd_theta, TruncationError
 from .disentangler import get_disentangler
@@ -83,9 +82,6 @@ class PurificationApplyMPO(VariationalApplyMPO):
 class PurificationTEBD(tebd.TEBDEngine):
     r"""Time evolving block decimation (TEBD) for purification MPS.
 
-    .. deprecated :: 0.6.0
-        Renamed parameter/attribute `TEBD_params` to :attr:`options`.
-
     Parameters are the same as for :class:`~tenpy.algorithms.algorithm.Algorithm`.
 
     Options
@@ -100,7 +96,7 @@ class PurificationTEBD(tebd.TEBDEngine):
     Attributes
     ----------
     used_disentangler : :class:`Disentangler`
-        The disentangler to be used on the auxiliar indices.
+        The disentangler to be used on the auxiliary indices.
         Chosen by :func:`~tenpy.algorithms.disentangler.get_disentangler`,
         called with the TEBD parameter ``'disentangle'``.
         Defaults to the trivial disentangler for ``options['disentangle']=None``.
@@ -114,11 +110,13 @@ class PurificationTEBD(tebd.TEBDEngine):
         super().__init__(psi, model, options, **kwargs)
         self._disent_iterations = np.zeros(psi.L)
         self._guess_U_disent = None  # will be set in calc_U
-        method = self.options.get('disentangle', None)
+        method = self.options.get('disentangle', None, str)
         self.used_disentangler = get_disentangler(str(method), self)
 
     def run_imaginary(self, beta):
-        """Run imaginary time evolution to cool down to the given `beta`.
+        """Run imaginary time evolution to cool down by the given `beta`.
+
+        Applies imaginary time evolution `exp(-beta H)` to :attr:`psi`.
 
         Note that we don't change the `norm` attribute of the MPS, i.e. normalization is preserved.
 
@@ -129,10 +127,10 @@ class PurificationTEBD(tebd.TEBDEngine):
             We evolve to the closest multiple of ``options['dt']``,
             see also :attr:`evolved_time`.
         """
-        delta_t = self.options.get('dt', 0.1)
+        delta_t = self.options.get('dt', 0.1, 'real')
         TrotterOrder = 2  # currently, imaginary time evolution works only for second order.
         self.calc_U(TrotterOrder, delta_t, type_evo='imag')
-        self.update_imag(N_steps=int(beta / delta_t + 0.5))
+        self.update_imag(N_steps=int(beta / delta_t + 0.5), call_canonical_form=True)
         logger.info(
             "--> beta=%(beta).6f, E_bond=%(E).10f, max(S)=%(S).10f", {
                 'beta': -self.evolved_time.imag,
@@ -265,14 +263,14 @@ class PurificationTEBD(tebd.TEBDEngine):
         r"""Disentangle `theta` before splitting with svd.
 
         For the purification we write :math:`\rho_P = Tr_Q{|\psi_{P,Q}><\psi_{P,Q}|}`. Thus, we
-        can actually apply any unitary to the auxiliar `Q` space of :math:`|\psi>` without
+        can actually apply any unitary to the auxiliary `Q` space of :math:`|\psi>` without
         changing the result.
 
         .. note ::
             We have to apply the *same* unitary to the 'bra' and 'ket' used for expectation values
             / correlation functions!
 
-        The behaviour of this function is set by :attr:`used_disentangler`,
+        The behavior of this function is set by :attr:`used_disentangler`,
         which in turn is obtained from ``get_disentangler(options['disentangle'])``,
         see :func:`~tenpy.algorithms.disentangler.get_disentangler` for details on the syntax.
 
@@ -298,10 +296,10 @@ class PurificationTEBD(tebd.TEBDEngine):
     def disentangle_global(self, pair=None):
         """Try global disentangling by determining the maximally entangled pairs of sites.
 
-        Calculate the mutual information (in the auxiliar space) between two sites and determine
+        Calculate the mutual information (in the auxiliary space) between two sites and determine
         where it is maximal. Disentangle these two sites with :meth:`disentangle`
         """
-        max_range = self.options.get('disent_gl_maxrange', 10)
+        max_range = self.options.get('disent_gl_maxrange', 10, int)
         if pair is None:
             coords, mutinf = self.psi.mutinf_two_site(max_range, legs='q')
             # TODO: recalculate mutinf only as necessary and do multiple steps at once...
@@ -380,7 +378,7 @@ class PurificationTEBD(tebd.TEBDEngine):
 
     def _disentangle_two_site(self, i, j):
         """swap until i and j are next to each other and use :meth:`disentangle`; swap back."""
-        on_way = self.options.get('disent_gl_on_swap', False)
+        on_way = self.options.get('disent_gl_on_swap', False, bool)
         if not self.psi.finite:
             raise NotImplementedError  # adjust: what's the shortest path?
         assert (i < j)

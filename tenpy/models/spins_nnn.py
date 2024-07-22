@@ -1,6 +1,6 @@
-"""Next-Nearest-neighbour spin-S models.
+"""Next-Nearest-neighbor spin-S models.
 
-Uniform lattice of spin-S sites, coupled by next-nearest-neighbour interactions.
+Uniform lattice of spin-S sites, coupled by next-nearest-neighbor interactions.
 We have two variants implementing the same hamiltonian.
 The :class:`SpinChainNNN` uses the
 :class:`~tenpy.networks.site.GroupedSite` to keep it a
@@ -11,23 +11,20 @@ range couplings twice for the grouped sites.
 
 Note that you can also get a :class:`~tenpy.models.model.NearestNeighborModel` for TEBD from the
 latter by using :meth:`~tenpy.models.model.MPOModel.group_sites` and
-:meth:`~tenpy.models.model.NearestNeighbormodel.from_MPOModel`.
+:meth:`~tenpy.models.model.NearestNeighborModel.from_MPOModel`.
 An example for such a case is given in the file ``examples/c_tebd.py``.
 """
-# Copyright 2018-2023 TeNPy Developers, GNU GPLv3
-
-import numpy as np
+# Copyright (C) TeNPy Developers, GNU GPLv3
 
 from .lattice import Chain
 from ..networks.site import SpinSite, GroupedSite
 from .model import CouplingMPOModel, NearestNeighborModel
-from ..tools.params import asConfig
 
 __all__ = ['SpinChainNNN', 'SpinChainNNN2']
 
 
 class SpinChainNNN(CouplingMPOModel, NearestNeighborModel):
-    r"""Spin-S sites coupled by (next-)nearest neighbour interactions on a `GroupedSite`.
+    r"""Spin-S sites coupled by (next-)nearest neighbor interactions on a `GroupedSite`.
 
     The Hamiltonian reads:
 
@@ -63,7 +60,7 @@ class SpinChainNNN(CouplingMPOModel, NearestNeighborModel):
             What should be conserved. See :class:`~tenpy.networks.Site.SpinSite`.
         Jx, Jy, Jz, Jxp, Jyp, Jzp, hx, hy, hz : float | array
             Coupling as defined for the Hamiltonian above.
-        bc_MPS : {'finite' | 'infinte'}
+        bc_MPS : {'finite' | 'infinite'}
             MPS boundary conditions. Coupling boundary conditions are chosen appropriately.
 
     """
@@ -71,8 +68,8 @@ class SpinChainNNN(CouplingMPOModel, NearestNeighborModel):
     force_default_lattice = True
 
     def init_sites(self, model_params):
-        S = model_params.get('S', 0.5)
-        conserve = model_params.get('conserve', 'best')
+        S = model_params.get('S', 0.5, 'real')
+        conserve = model_params.get('conserve', 'best', str)
         if conserve == 'best':
             # check how much we can conserve
             if not model_params.any_nonzero([('Jx', 'Jy'),
@@ -88,15 +85,15 @@ class SpinChainNNN(CouplingMPOModel, NearestNeighborModel):
         return site
 
     def init_terms(self, model_params):
-        Jx = model_params.get('Jx', 1.)
-        Jy = model_params.get('Jy', 1.)
-        Jz = model_params.get('Jz', 1.)
-        Jxp = model_params.get('Jxp', 1.)
-        Jyp = model_params.get('Jyp', 1.)
-        Jzp = model_params.get('Jzp', 1.)
-        hx = model_params.get('hx', 0.)
-        hy = model_params.get('hy', 0.)
-        hz = model_params.get('hz', 0.)
+        Jx = model_params.get('Jx', 1., 'real_or_array')
+        Jy = model_params.get('Jy', 1., 'real_or_array')
+        Jz = model_params.get('Jz', 1., 'real_or_array')
+        Jxp = model_params.get('Jxp', 1., 'real_or_array')
+        Jyp = model_params.get('Jyp', 1., 'real_or_array')
+        Jzp = model_params.get('Jzp', 1., 'real_or_array')
+        hx = model_params.get('hx', 0., 'real_or_array')
+        hy = model_params.get('hy', 0., 'real_or_array')
+        hz = model_params.get('hz', 0., 'real_or_array')
 
         # Only valid for self.lat being a Chain...
         self.add_onsite(-hx, 0, 'Sx0')
@@ -125,7 +122,7 @@ class SpinChainNNN(CouplingMPOModel, NearestNeighborModel):
 
 
 class SpinChainNNN2(CouplingMPOModel):
-    r"""Spin-S sites coupled by next-nearest neighbour interactions.
+    r"""Spin-S sites coupled by next-nearest neighbor interactions.
 
     The Hamiltonian reads:
 
@@ -157,15 +154,14 @@ class SpinChainNNN2(CouplingMPOModel):
         conserve : 'best' | 'Sz' | 'parity' | None
             What should be conserved. See :class:`~tenpy.networks.Site.SpinSite`.
             For ``'best'``, we check the parameters what can be preserved.
-        sort_charge : bool | None
-            Whether to sort by charges of physical legs.
-            See change comment in :class:`~tenpy.networks.site.Site`.
+        sort_charge : bool
+            Whether to sort by charges of physical legs. `True` by default.
         Jx, Jy, Jz, Jxp, Jyp, Jzp, hx, hy, hz : float | array
             Coupling as defined for the Hamiltonian above.
     """
     def init_sites(self, model_params):
-        S = model_params.get('S', 0.5)
-        conserve = model_params.get('conserve', 'best')
+        S = model_params.get('S', 0.5, 'real')
+        conserve = model_params.get('conserve', 'best', str)
         if conserve == 'best':
             # check how much we can conserve
             if not model_params.any_nonzero([('Jx', 'Jy'),
@@ -176,21 +172,21 @@ class SpinChainNNN2(CouplingMPOModel):
             else:
                 conserve = None
             self.logger.info("%s: set conserve to %s", self.name, conserve)
-        sort_charge = model_params.get('sort_charge', None)
+        sort_charge = model_params.get('sort_charge', True)
         site = SpinSite(S, conserve, sort_charge=sort_charge)
         return site
 
     def init_terms(self, model_params):
         # 0) read out/set default parameters
-        Jx = model_params.get('Jx', 1.)
-        Jy = model_params.get('Jy', 1.)
-        Jz = model_params.get('Jz', 1.)
-        Jxp = model_params.get('Jxp', 1.)
-        Jyp = model_params.get('Jyp', 1.)
-        Jzp = model_params.get('Jzp', 1.)
-        hx = model_params.get('hx', 0.)
-        hy = model_params.get('hy', 0.)
-        hz = model_params.get('hz', 0.)
+        Jx = model_params.get('Jx', 1., 'real_or_array')
+        Jy = model_params.get('Jy', 1., 'real_or_array')
+        Jz = model_params.get('Jz', 1., 'real_or_array')
+        Jxp = model_params.get('Jxp', 1., 'real_or_array')
+        Jyp = model_params.get('Jyp', 1., 'real_or_array')
+        Jzp = model_params.get('Jzp', 1., 'real_or_array')
+        hx = model_params.get('hx', 0., 'real_or_array')
+        hy = model_params.get('hy', 0., 'real_or_array')
+        hz = model_params.get('hz', 0., 'real_or_array')
 
         for u in range(len(self.lat.unit_cell)):
             self.add_onsite(-hx, u, 'Sx')
