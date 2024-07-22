@@ -269,16 +269,6 @@ class Model(Hdf5Exportable):
         model_params['time'] = new_time
         return cls(model_params)
 
-class HeavyHexModel(Model):
-    def __init__(self, lattice, H_bond):
-        Model.__init__(self, lattice)
-        self.H_bond = H_bond
-        for Hb in H_bond.values():
-            if Hb is not None:
-                self.dtype = Hb.dtype
-                break
-        else:
-            raise ValueError("All H_bond are `None`!")
 
 
     def estimate_RAM_saving_factor(self):
@@ -313,6 +303,18 @@ class HeavyHexModel(Model):
             savings = self.options.get("mem_saving_factor", savings, 'real')
         return savings
 
+
+
+class HeavyHexModel(Model):
+    def __init__(self, lattice, H_bond):
+        Model.__init__(self, lattice)
+        self.H_bond = H_bond
+        for Hb in H_bond.values():
+            if Hb is not None:
+                self.dtype = Hb.dtype
+                break
+        else:
+            raise ValueError("All H_bond are `None`!")
 
 class NearestNeighborModel(Model):
     r"""Base class for a model of nearest neighbor interactions w.r.t. the MPS index.

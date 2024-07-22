@@ -55,7 +55,7 @@ class XXZChain(CouplingModel, NearestNeighborModel, MPOModel):
         Jz = model_params.get('Jz', 1., 'real_or_array')
         hz = model_params.get('hz', 0., 'real_or_array')
         bc_MPS = model_params.get('bc_MPS', 'finite', str)
-        sort_charge = model_params.get('sort_charge', True, bool)
+        sort_charge = model_params.get('sort_charge', None)
         # 1-3):
         USE_PREDEFINED_SITE = False
         if not USE_PREDEFINED_SITE:
