@@ -33,18 +33,11 @@ optional arguments:
 
 Examples
 --------
-
 In the simplest case, you just give a single yaml file with all the parameters as argument:
-
     tenpy-run my_params.yml
-
 If you implemented a custom simulation class called ``MyGreatSimulation`` in a
 file ``my_simulations.py``, you can use it like this:
-
     tenpy-run -i my_simulations -c MyGreatSimulation my_params.yml
-
 Further, you can overwrite one or multiple options of the parameters file:
-
     tenpy-run my_params.yml -o output_filename '"rerun_Jz_2.h5"' -o model_params.Jz 2.
-
 Note that string values for the options require double quotes on the command line.

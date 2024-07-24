@@ -7,7 +7,7 @@ from .model import CouplingModel, MPOModel, HeavyHexModel
 
 
 class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
-    def __init__(self, model_params, ordering=None, layers=None):
+    def __init__(self, model_params, layers=None):
         model_params = asConfig(model_params, "XXZChain")
         L = model_params.get("L", 2)
         Jxx = model_params.get("Jxx", 1.0)
@@ -49,7 +49,7 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
         # 5) initialize CouplingModel
         CouplingModel.__init__(self, lat)
 
-        connections = self.get_connections(L, ordering, layers)
+        connections = self.get_connections(L, layers)
         self._connections = connections
         # Edit line below and loop over all heavy hex connectivities
         connection_no = 0
@@ -60,6 +60,7 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
             self.add_coupling_term(Jz[connection_no], i, j, "Sz", "Sz")
             connection_no += 1
 
+        # self.layers is a list of list containing the indices of the connections in the flatten layer list.
         self.layers = self.get_layers(L, layers)
 
         HeavyHexModel.__init__(self, lat, self.calc_H_bond(connections))
@@ -89,7 +90,7 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
                     H_bond[(i, j)] = Hb + Hb.conj().itranspose(Hb.get_leg_labels())
         return H_bond
 
-    def get_connections(self, L, ordering, layers):
+    def get_connections(self, L, layers):
 
         if layers != None:
             connections = [conn[i] for conn in layers for i in range(len(conn))]
@@ -304,23 +305,6 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
 
             connections = connections_layer1 + connections_layer2 + connections_layer3
 
-            if ordering != None:
-                print("Applying new ordering:")
-                print(ordering)
-                # can be optimized
-                new_connections = []
-                for c in connections:
-                    i = ordering.index(c[0])
-                    j = ordering.index(c[1])
-                    if i < j:
-                        new_connections.append((i, j))
-                    else:
-                        new_connections.append((j, i))
-
-                connections = new_connections
-                print("New connections:")
-                print(connections)
-
         else:
             raise NotImplementedError()
 
@@ -334,7 +318,7 @@ class XXZHeavyHex(CouplingModel, HeavyHexModel, MPOModel):
             connect = 0
             for i in range(len(layers)):
                 layers_list.append([])
-                for j in range(len(layers[i])):
+                for _ in range(len(layers[i])):
                     layers_list[i].append(connect)
                     connect += 1
 
