@@ -197,14 +197,13 @@ class TEBDEngineHeavyHex(TEBDEngine):
         if order == 1:
             connection_numbers = self.model.layers[layer_no]
         elif order == 2:
-            if layer_no == 3:
-                layer_no = 1
-            elif layer_no == 4:
-                layer_no = 0
-            connection_numbers = self.model.layers[layer_no]
+            connection_numbers = self.model.layers[layer_no % 2]
         elif order == 4:
-            pattern = [0, 1, 2, 1]
-            connection_numbers = self.model.layers[pattern[layer_no % 4]]
+            if len(self.model.layers)==2:
+                connection_numbers = self.model.layers[layer_no % 2]
+            if len(self.model.layers)==3:
+                pattern = [0, 1, 2, 1]
+                connection_numbers = self.model.layers[pattern[layer_no % 4]]
         else:
             raise NotImplementedError()
 
