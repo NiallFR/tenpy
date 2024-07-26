@@ -31,6 +31,16 @@ class MPO_TEBDEngine_HeavyHex(TEBDEngineHeavyHex):
         self.conserve = conserve
         self.conj = conj
 
+    def debug_MPO(self, MPO):
+        print("Debug MPO Start")
+
+        for i in range(MPO.L):
+            print(f"\nSite i = {i}\n")
+            print(MPO.get_W(i))
+
+        print(f"Chis: {MPO.chi}")
+        a = input("...")
+
     def set_identity_MPO(self, L, M):
         B = np.zeros([4, 2, 2, 4], dtype=float)
         B_left = np.zeros([1, 2, 2, 4], dtype=float)
@@ -117,16 +127,6 @@ class MPO_TEBDEngine_HeavyHex(TEBDEngineHeavyHex):
         # Define trott_unit as e^{-ih_{ij}t}: first set identity as in
         # initial condition. Then set US as left most unit and V as right most
 
-        def debug_MPO(MPO):
-            print("Debug MPO Start")
-
-            for i in range(MPO.L):
-                print(f"\nSite i = {i}\n")
-                print(MPO.get_W(i))
-
-            # print(f"Chis: {MPO.chi}")
-            a = input("...")
-
         trott_unit = self.set_identity_MPO(j - i + 1, self.model)
         trott_unit.set_W(0, US)
         trott_unit.set_W(j - i, V)
@@ -199,11 +199,16 @@ class MPO_TEBDEngine_HeavyHex(TEBDEngineHeavyHex):
         return truncation_error
 
     def evolve(self, N_steps, dt):
+        """
+        Get called from "run_evolution" method.
+        """
         if dt is not None:
             assert dt == self._U_param["delta_t"]
         order = self._U_param["order"]
 
         for ly in range(len(self.model.layers)):
+            # maybe this is wrong? check Us and connection_numbers
+            # self._U is in general longer than len(self.model.layers)!!!
             connection_numbers = self.model.layers[ly]
             Us = self._U[ly]
             for k in range(len(Us)):
@@ -217,6 +222,7 @@ class MPO_TEBDEngine_HeavyHex(TEBDEngineHeavyHex):
                 # for k in range(self.F.L):
                 # print('k = ', k)
                 # print('F_k = ', self.F.get_W(k).shape)
+                # change indentation for?
                 if max(self.F.chi) > self.chi:
                     # print(f"MPO truncation")
                     options = {
@@ -233,49 +239,49 @@ class MPO_TEBDEngine_HeavyHex(TEBDEngineHeavyHex):
         return trunc_err
 
 
-class MPO_TEBDEngine_HeavyHex_Test(MPO_TEBDEngine_HeavyHex):
-    def __init__(self, F, model, layer_no, conserve, conj, options, **kwargs):
-        MPO_TEBDEngine_HeavyHex.__init__(
-            self, F, model, layer_no, conserve, conj, options, **kwargs
-        )
+# class MPO_TEBDEngine_HeavyHex_Test(MPO_TEBDEngine_HeavyHex):
+#     def __init__(self, F, model, layer_no, conserve, conj, options, **kwargs):
+#         MPO_TEBDEngine_HeavyHex.__init__(
+#             self, F, model, layer_no, conserve, conj, options, **kwargs
+#         )
 
-    def set_identity_MPO(self, L, M):
-        B = np.zeros([1, 2, 2, 1], dtype=float)
-        B[0, 0, 0, 0] = 1
-        B[0, 1, 1, 0] = 1
-        labels = ["wL", "p", "p*", "wR"]
+#     def set_identity_MPO(self, L, M):
+#         B = np.zeros([1, 2, 2, 1], dtype=float)
+#         B[0, 0, 0, 0] = 1
+#         B[0, 1, 1, 0] = 1
+#         labels = ["wL", "p", "p*", "wR"]
 
-        if self.conserve:
-            leg_charge1 = npc.LegCharge.from_qflat(
-                npc.ChargeInfo([1], ["2*Sz"]), [1], qconj=1
-            )
-            leg_charge2 = npc.LegCharge.from_qflat(
-                npc.ChargeInfo([1], ["2*Sz"]), [1, -1], qconj=1
-            )
-            leg_charge3 = npc.LegCharge.from_qflat(
-                npc.ChargeInfo([1], ["2*Sz"]), [1, -1], qconj=-1
-            )
-            leg_charge4 = npc.LegCharge.from_qflat(
-                npc.ChargeInfo([1], ["2*Sz"]), [1], qconj=-1
-            )
-            leg_charge = [leg_charge1, leg_charge2, leg_charge3, leg_charge4]
-            B_array = npc.Array.from_ndarray(B, legcharges=leg_charge, labels=labels)
+#         if self.conserve:
+#             leg_charge1 = npc.LegCharge.from_qflat(
+#                 npc.ChargeInfo([1], ["2*Sz"]), [1], qconj=1
+#             )
+#             leg_charge2 = npc.LegCharge.from_qflat(
+#                 npc.ChargeInfo([1], ["2*Sz"]), [1, -1], qconj=1
+#             )
+#             leg_charge3 = npc.LegCharge.from_qflat(
+#                 npc.ChargeInfo([1], ["2*Sz"]), [1, -1], qconj=-1
+#             )
+#             leg_charge4 = npc.LegCharge.from_qflat(
+#                 npc.ChargeInfo([1], ["2*Sz"]), [1], qconj=-1
+#             )
+#             leg_charge = [leg_charge1, leg_charge2, leg_charge3, leg_charge4]
+#             B_array = npc.Array.from_ndarray(B, legcharges=leg_charge, labels=labels)
 
-        else:
-            B_array = npc.Array.from_ndarray_trivial(B, labels=labels)
+#         else:
+#             B_array = npc.Array.from_ndarray_trivial(B, labels=labels)
 
-        F = MPO.from_wavepacket(M.lat.mps_sites()[0:L], [1.0] * L, "Id")
-        for k in range(0, L):
-            F.set_W(k, B_array)
-        F.Ss = [[1.0]] * L
+#         F = MPO.from_wavepacket(M.lat.mps_sites()[0:L], [1.0] * L, "Id")
+#         for k in range(0, L):
+#             F.set_W(k, B_array)
+#         F.Ss = [[1.0]] * L
 
-        return F
+#         return F
 
-    def set_B_left(self):
-        B = np.zeros([4, 2, 2, 1], dtype=float)
-        B[0, 0, 0, 0] = 1
-        B[0, 1, 1, 0] = 1
-        labels = ["wL", "p", "p*", "wR"]
+#     def set_B_left(self):
+#         B = np.zeros([4, 2, 2, 1], dtype=float)
+#         B[0, 0, 0, 0] = 1
+#         B[0, 1, 1, 0] = 1
+#         labels = ["wL", "p", "p*", "wR"]
 
 
 class MPO_TEBDEngine_HeavyHex_qc(MPO_TEBDEngine_HeavyHex):
