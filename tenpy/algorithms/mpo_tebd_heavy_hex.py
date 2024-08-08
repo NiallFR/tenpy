@@ -206,32 +206,37 @@ class MPO_TEBDEngine_HeavyHex(TEBDEngineHeavyHex):
             assert dt == self._U_param["delta_t"]
         order = self._U_param["order"]
 
-        for ly in range(len(self.model.layers)):
-            # maybe this is wrong? check Us and connection_numbers
-            # self._U is in general longer than len(self.model.layers)!!!
+        # code dependent on the particular implementation of calc_U
+        # (layers order is like 010101.. or 0121012..)
+        def pattern(maxnum, L):
+            direction = 0
+            res = [0]
+            for _ in range(L):
+                res.append(res[-1] + (-1) ** direction)
+                if res[-1] == maxnum - 1 or res[-1] == 0:
+                    direction += 1
+            return res
+
+        layers_indices = pattern(len(self.model.layers), len(self._U))
+
+        for Us, ly in zip(self._U, layers_indices):
+
             connection_numbers = self.model.layers[ly]
-            Us = self._U[ly]
-            for k in range(len(Us)):
-                U_bond = Us[k]
+            for k, U_bond in enumerate(Us):
                 U, S, V, trunc_err, renormalize = self.svd_u_bond(U_bond)
                 bond_no = connection_numbers[k]
                 i, j = self.model._connections[bond_no]
                 self.set_USV(U, S, V, i, j)
-                # print('i = ', i)
-                # print('j = ', j)
-                # for k in range(self.F.L):
-                # print('k = ', k)
-                # print('F_k = ', self.F.get_W(k).shape)
-                # change indentation for?
-                if max(self.F.chi) > self.chi:
-                    # print(f"MPO truncation")
-                    options = {
-                        "trunc_params": {"chi_max": self.chi, "svd_min": 1.0e-15},
-                        "compression_method": "SVD",
-                    }
-                    # print(f"Chi before compression {self.F.chi}")
-                    mpo_trunc_error = self.compress_mpo(self.F, options)
-                    # print(f"Chi after compression {self.F.chi}, mpo trunc error: {mpo_trunc_error}")
+
+            if max(self.F.chi) > self.chi:
+                # print(f"MPO truncation")
+                options = {
+                    "trunc_params": {"chi_max": self.chi, "svd_min": 1.0e-15},
+                    "compression_method": "SVD",
+                }
+                # print(f"Chi before compression {self.F.chi}")
+                mpo_trunc_error = self.compress_mpo(self.F, options)
+                # print(f"Chi after compression {self.F.chi}, mpo trunc error: {mpo_trunc_error}")
 
         self.trunc_err = self.trunc_err + trunc_err  # not += : make a copy!
         self.evolved_time = self.evolved_time + N_steps * self._U_param["tau"]
