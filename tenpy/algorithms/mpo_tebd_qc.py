@@ -31,7 +31,9 @@ class MPO_TEBDEngine_qc(TEBDEngine_qc):
         Function that updates the B matrices, the bond matrix s between and the
         bond dimension chi for bond i. The correponding tensor networks look like this::
 
-        |           --S--B1--B2--           --B1--B2--
+            
+                          |   |                |   |
+        |           --S--W0--W1--           --W0--W1--
         |                |   |                |   |
         |     theta:     U_bond        C:     U_bond
         |                |   |                |   |
@@ -63,9 +65,10 @@ class MPO_TEBDEngine_qc(TEBDEngine_qc):
         C.iset_leg_labels(new_labels)
         # print('C0 = ', C0)
         # print('C1 = ', C1)
-        # print('C = ', C)
+        #print('C = ', C)
 
-        # print('U_bond = ', U_bond)
+        #print('U_bond = ', U_bond)
+        #input()
         C = npc.tensordot(U_bond, C, axes=(['p0*', 'p1*'], ['p0', 'p1']))  # apply U
         # print('U_bond_C = ', C)
         # C.itranspose(['vL', 'p0', 'p1', 'vR'])

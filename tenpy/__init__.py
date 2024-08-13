@@ -95,7 +95,6 @@ __version__ = version.version
 __full_version__ = version.full_version
 
 __all__ = [
-
     # subpackages
     'algorithms', 'linalg', 'models', 'networks', 'simulations', 'tools', 'version',
     # from tenpy.algorithms
@@ -138,7 +137,6 @@ __all__ = [
     'load_yaml_with_py_eval',
     # from tenpy.__init__, i.e. defined below
     'show_config', 'console_main',
-
 ]
 
 def show_config():
@@ -242,7 +240,6 @@ def _setup_arg_parser(width=None):
                         '-m',
                         default='error',
                         help="Selects how to merge conflicts in case of multiple yaml files. "
-
                         "Options are 'error', 'first' or 'last'.")
     parser.add_argument('--RAM',
                         action="store_true",
