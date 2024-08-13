@@ -4,16 +4,16 @@ The AKLT model is famous for having a very simple ground state MPS of bond dimen
 Writing down the Hamiltonian is easiest done in terms of bond couplings.
 This class thus serves as an example how this can be done.
 """
-# Copyright 2021-2023 TeNPy Developers, GNU GPLv3
+# Copyright (C) TeNPy Developers, GNU GPLv3
 
 import numpy as np
 
-import tenpy.linalg.np_conserved as npc
-from tenpy.networks.site import SpinSite, kron
-from tenpy.networks.mps import MPS
-from tenpy.models.lattice import Chain
-from tenpy.models.model import NearestNeighborModel, MPOModel
-from tenpy.tools.params import asConfig
+from ..linalg import np_conserved as npc
+from ..networks.site import SpinSite, kron
+from ..networks.mps import MPS
+from .lattice import Chain
+from .model import NearestNeighborModel, MPOModel
+from ..tools.params import asConfig
 
 __all__ = ['AKLTChain']
 
@@ -33,16 +33,16 @@ class AKLTChain(NearestNeighborModel, MPOModel):
     """
     def __init__(self, model_params):
         model_params = asConfig(model_params, "AKLTModel")
-        L = model_params.get('L', 2)
-        conserve = model_params.get('conserve', 'Sz')
+        L = model_params.get('L', 2, int)
+        conserve = model_params.get('conserve', 'Sz', str)
         if conserve == 'best':
             conserve = 'Sz'
             self.logger.info("%s: set conserve to %s", self.name, conserve)
-        sort_charge = model_params.get('sort_charge', None)
+        sort_charge = model_params.get('sort_charge', True, bool)
         site = SpinSite(S=1., conserve=conserve, sort_charge=sort_charge)
 
         # lattice
-        bc_MPS = model_params.get('bc_MPS', 'finite')
+        bc_MPS = model_params.get('bc_MPS', 'finite', str)
         bc = 'open' if bc_MPS == 'finite' else 'periodic'
         lat = Chain(L, site, bc=bc, bc_MPS=bc_MPS)
 
@@ -53,7 +53,7 @@ class AKLTChain(NearestNeighborModel, MPOModel):
         H_bond = S_dot_S + S_dot_S_square / 3.
         # P_2 = H_bond * 0.5 + 1/3 * npc.eye_like(S_dot_S)
 
-        J = model_params.get('J', 1.)
+        J = model_params.get('J', 1., 'real_or_array')
         H_bond = J * H_bond.split_legs().transpose(['p0', 'p1', 'p0*', 'p1*'])
         H_bond = [H_bond] * L
         # H_bond[i] acts on sites (i-1, i)
@@ -103,7 +103,7 @@ class AKLTChain(NearestNeighborModel, MPOModel):
         if self.lat.bc_MPS == 'finite':
             # project onto one of the two virtual states on the left/right most state.
             # It's a ground state whatever you choose here,
-            # but we project to different indices to allow Sz convservation
+            # but we project to different indices to allow Sz conservation
             # and fix overall Sz=0 sector
             Bs[0] = Bs[0][:, :1, :]
             Bs[-1] = Bs[-1][:, :, :-1]

@@ -16,24 +16,23 @@ Further, an overview with plots of the predefined models is given in
 :doc:`/notebooks/90_overview_predefined_lattices`
 
 """
-# Copyright 2018-2023 TeNPy Developers, GNU GPLv3
+# Copyright (C) TeNPy Developers, GNU GPLv3
 
 import numpy as np
+from scipy.spatial import ConvexHull, Voronoi
 import itertools
-import warnings
 import copy
 import logging
 logger = logging.getLogger(__name__)
 
 from ..networks.site import Site
-from ..tools.misc import (to_iterable, to_array, to_iterable_of_len, inverse_permutation,
-                          get_close, find_subclass)
+from ..tools.misc import to_iterable, to_array, inverse_permutation, get_close, find_subclass
 from ..networks.mps import MPS  # only to check boundary conditions
 
 __all__ = [
     'Lattice', 'TrivialLattice', 'SimpleLattice', 'MultiSpeciesLattice', 'IrregularLattice',
     'HelicalLattice', 'Chain', 'Ladder', 'NLegLadder', 'Square', 'Triangular', 'Honeycomb',
-    'Kagome', 'get_lattice', 'get_order', 'get_order_grouped'
+    'Kagome', 'SimpleBZ', 'get_lattice', 'get_order', 'get_order_grouped'
 ]
 
 # (update module doc string if you add further lattices)
@@ -57,16 +56,11 @@ class Lattice:
     The **MPS index** `i` corresponds thus to the lattice sites given by
     ``(x_0, ..., x_{dim-1}, u) = tuple(self.order[i])``.
     Infinite boundary conditions of the MPS repeat in the first spatial direction of the lattice,
-    i.e., if the site at ``(x_0, x_1, ..., x_{dim-1},u)`` has MPS index `i`, the site at
+    i.e., if the site at ``(x_0, x_1, ..., x_{dim-1},u)`` has MPS index `i`, the site
     at ``(x_0 + Ls[0], x_1, ..., x_{dim-1}, u)`` corresponds to MPS index ``i + N_sites``.
     Use :meth:`mps2lat_idx` and :meth:`lat2mps_idx` for conversion of indices.
     The function :meth:`mps2lat_values` performs the necessary reshaping and re-ordering from
     arrays indexed in MPS form to arrays indexed in lattice form.
-
-    .. deprecated :: 0.5.0
-        The parameters and attributes `nearest_neighbors`, `next_nearest_neighbors` and
-        `next_next_nearest_neighbors` are deprecated. Instead, we use a dictionary `pairs`
-        with those names as keys and the corresponding values as specified before.
 
     Parameters
     ----------
@@ -93,12 +87,6 @@ class Lattice:
     positions : iterable of 1D arrays
         For each site of the unit cell the position within the unit cell.
         Defaults to ``np.zeros((len(unit_cell), dim))``.
-    nearest_neighbors : ``None`` | list of ``(u1, u2, dx)``
-        Deprecated. Specify as ``pairs['nearest_neighbors']`` instead.
-    next_nearest_neighbors : ``None`` | list of ``(u1, u2, dx)``
-        Deprecated. Specify as ``pairs['next_nearest_neighbors']`` instead.
-    next_next_nearest_neighbors : ``None`` | list of ``(u1, u2, dx)``
-        Deprecated. Specify as ``pairs['next_next_nearest_neighbors']`` instead.
     pairs : dict
         Of the form ``{'nearest_neighbors': [(u1, u2, dx), ...], ...}``.
         Typical keys are ``'nearest_neighbors', 'next_nearest_neighbors'``.
@@ -118,7 +106,7 @@ class Lattice:
     N_sites : int
         the number of sites in the lattice, ``np.prod(self.shape)``.
     N_sites_per_ring : int
-        Defined as ``N_sites / Ls[0]``, for an infinite system the number of cites per "ring".
+        Defined as ``N_sites / Ls[0]``, for an infinite system the number of sites per "ring".
     N_rings : int
         Alias for ``Ls[0]``, for an infinite system the number of "rings" in the unit cell.
     unit_cell : list of :class:`~tenpy.networks.site.Site`
@@ -144,12 +132,12 @@ class Lattice:
         possibly introducing a disorder of each site.
         It is *only* used by :meth:`position` (e.g. when plotting lattice sites)
         and :meth:`distance`. To use this, you can set the `position_disorder` in a model,
-        and then read out and use the :meth:`distance` to possibly rescale the couling strengths.
+        and then read out and use the :meth:`distance` to possibly rescale the coupling strengths.
         The correct shape  is ``Ls[0], Ls[1], ..., len(unit_cell), Dim``, where `Dim` is the same
         dimension as for the `unit_cell_positions` and `basis`.
     pairs : dict
         See above.
-    segement_first_last : tuple of int
+    segment_first_last : tuple of int
         The `first` and `last` MPS sites for "segment" :attr:`bc_MPS`; not set otherwise.
     _order : ndarray (N_sites, dim+1)
         The place where :attr:`order` is stored.
@@ -175,9 +163,6 @@ class Lattice:
                  bc_MPS='finite',
                  basis=None,
                  positions=None,
-                 nearest_neighbors=None,
-                 next_nearest_neighbors=None,
-                 next_next_nearest_neighbors=None,
                  pairs=None):
         self.unit_cell = list(unit_cell)
         self._set_Ls(Ls)  # after setting unit_cell
@@ -186,25 +171,16 @@ class Lattice:
         if basis is None:
             basis = np.eye(self.dim)
         self.unit_cell_positions = np.array(positions)
-        self.basis = np.array(basis)
+        self._basis = np.array(basis)
+        self._reciprocal_basis = None  # lazy evaluation of recip. basis
+        self._BZ = None
         self.boundary_conditions = bc  # property setter for self.bc and self.bc_shift
         self.bc_MPS = bc_MPS
         self.position_disorder = None  # no disorder by default
         # calculate order for MPS
         self.order = self.ordering(order)
-        # uses attribute setter to calculte _mps2lat_vals_idx_fix_u etc and lat2mps
+        # uses attribute setter to calculate _mps2lat_vals_idx_fix_u etc and lat2mps
         self.pairs = pairs if pairs is not None else {}
-        for name, NN in [('nearest_neighbors', nearest_neighbors),
-                         ('next_nearest_neighbors', next_nearest_neighbors),
-                         ('next_next_nearest_neighbors', next_next_nearest_neighbors)]:
-            if NN is None:
-                continue  # no value set
-            msg = "Lattice.__init__() got argument `{0!s}`.\nSet as `neighbors['{0!s}'] instead!"
-            msg = msg.format(name)
-            warnings.warn(msg, FutureWarning)
-            if name in self.pairs:
-                raise ValueError("{0!s} sepcified twice!".format(name))
-            self.pairs[name] = NN
         self.test_sanity()  # check consistency
 
     def test_sanity(self):
@@ -284,17 +260,16 @@ class Lattice:
         hdf5_saver.save(self.bc_MPS, subpath + "boundary_condition_MPS")
         hdf5_saver.save(self.order, subpath + "order_for_MPS")
         hdf5_saver.save(self.pairs, subpath + "pairs")
-        # not necessary for loading, but still usefull
+        # not necessary for loading, but still useful
         h5gr.attrs["dim"] = self.dim
         h5gr.attrs["N_sites"] = self.N_sites
-        if hasattr(self, 'segement_first_last'):
+        if hasattr(self, 'segment_first_last'):
             first, last = self.segment_first_last
             h5gr.attrs['segment_first'] = first
             h5gr.attrs['segment_last'] = last
         position_disorder = getattr(self, 'position_disorder', None)
         if position_disorder is not None:
             hdf5_saver.save(self.position_disorder, subpath + "position_disorder")
-
 
     @classmethod
     def from_hdf5(cls, hdf5_loader, h5gr, subpath):
@@ -307,7 +282,7 @@ class Lattice:
         hdf5_loader : :class:`~tenpy.tools.hdf5_io.Hdf5Loader`
             Instance of the loading engine.
         h5gr : :class:`Group`
-            HDF5 group which is represent the object to be constructed.
+            HDF5 group which is representing the object to be constructed.
         subpath : str
             The `name` of `h5gr` with a ``'/'`` in the end.
 
@@ -340,6 +315,16 @@ class Lattice:
         return obj
 
     @property
+    def basis(self):
+        return self._basis
+
+    @basis.setter
+    def basis(self, new_basis):
+        self._basis = np.array(new_basis)
+        self._reciprocal_basis = None  # reset reciprocal basis
+        self._BZ = None
+
+    @property
     def dim(self):
         """The dimension of the lattice."""
         return len(self.Ls)
@@ -350,7 +335,7 @@ class Lattice:
 
         Each row of the array contains the lattice indices for one site,
         the order of the rows thus specifies a path through the lattice,
-        along which an MPS will wind through through the lattice.
+        along which an MPS will wind through the lattice.
 
         You can visualize the order with :meth:`plot_order`.
         """
@@ -383,7 +368,7 @@ class Lattice:
 
         Possible strings for the `order` defined here are:
 
-            ``'Csyle', 'default'`` :
+            ``'Cstyle', 'default'`` :
                 Recommended in most cases. First within the unit cell, then along y, then x.
                 ``priority=(0, 1, ..., dim-1, dim)``.
             ``'snake', 'snakeCstyle'`` :
@@ -548,28 +533,28 @@ class Lattice:
             A copy of `self` with "segment" :attr:`bc_MPS` and :attr:`segment_first_last` set.
         """
         cp = self.copy()
-        L = cp.N_sites
-        assert first >= 0
+        L = cp.N_sites # Size of finite MPS or unit cell
+        #assert first >= 0
         if enlarge is not None:
             if cp.bc_MPS != 'infinite':
                 raise ValueError("enlarge only possible for infinite MPS")
             if last is not None or first != 0:
-                raise ValueError("specifiy either `first`+`last` or `enlarge`!")
+                raise ValueError("specify either `first`+`last` or `enlarge`!")
             assert enlarge > 0
             last = enlarge * L - 1
+            # first = 0, not needed since first == 0 from above.
         elif last is None:
             last = L - 1
             enlarge = 1
         else:
-            enlarge = last + 1 // L
+            enlarge = last // L + 1
         assert enlarge > 0
         if enlarge > 1:
             cp.enlarge_mps_unit_cell(enlarge)
-        if first >= last:
-            raise ValueError(f"need first < last, got {first:d}, {last:d}")
         if first > 0 or last < cp.N_sites - 1:
             # take out some parts of the lattice
             remove = list(range(0, first)) + list(range(last + 1, cp.N_sites))
+            remove = cp.mps2lat_idx(remove)
             cp = IrregularLattice(cp, remove=remove)
         cp.bc_MPS = 'segment'
         if self.bc_MPS == 'finite':
@@ -666,7 +651,7 @@ class Lattice:
             we shift `x_0` accordingly.
         """
         if self.bc_MPS != 'finite':
-            # allow `i` outsit of MPS unit cell for bc_MPS infinite
+            # allow `i` outside of MPS unit cell for bc_MPS infinite
             i0 = i
             i = np.mod(i, self.N_sites)
             if np.any(i0 != i):
@@ -762,7 +747,7 @@ class Lattice:
         Returns
         -------
         res_A : ndarray
-            Reshaped and reordered verions of A. Such that MPS indices along the specified axes
+            Reshaped and reordered version of A. Such that MPS indices along the specified axes
             are replaced by lattice indices, i.e., if MPS index `j` maps to lattice site
             `(x0, x1, x2)`, then ``res_A[..., x0, x1, x2, ...] = A[..., j, ...]``.
 
@@ -786,7 +771,7 @@ class Lattice:
             >>> A_res = lat.mps2lat_values(A)
             >>> A_res.shape
             (10, 3, 2)
-            >>> A_res[tuple(lat.mps2lat_idx(5))] == A[5]
+            >>> bool(A_res[tuple(lat.mps2lat_idx(5))] == A[5])
             True
 
         If you have a correlation function ``C[i, j]``, it gets just slightly more complicated:
@@ -811,7 +796,7 @@ class Lattice:
             >>> A_u_res = lat.mps2lat_values(A_u, u=u)
             >>> A_u_res.shape
             (10, 3)
-            >>> np.all(A_res[:, :, u] == A_u_res[:, :])
+            >>> bool(np.all(A_res[:, :, u] == A_u_res[:, :]))
             True
         """
         axes = to_iterable(axes)
@@ -869,7 +854,7 @@ class Lattice:
             if include_u is None:
                 include_u = [None] * len(axes)
             if len(axes) != len(mps_inds) or len(axes) != len(include_u):
-                raise ValueError("Lenght of `axes`, `mps_inds` and `include_u` different")
+                raise ValueError("Length of `axes`, `mps_inds` and `include_u` different")
         # sort axes ascending
         axes = [(ax + A.ndim if ax < 0 else ax) for ax in axes]
 
@@ -954,26 +939,6 @@ class Lattice:
                 count += 1
         return count
 
-    def number_nearest_neighbors(self, u=0):
-        """Deprecated.
-
-        .. deprecated :: 0.5.0
-            Use :meth:`count_neighbors` instead.
-        """
-        msg = "Use ``count_neighbors(u, 'nearest_neighbors')`` instead."
-        warnings.warn(msg, FutureWarning)
-        return self.count_neighbors(u, 'nearest_neighbors')
-
-    def number_next_nearest_neighbors(self, u=0):
-        """Deprecated.
-
-        .. deprecated :: 0.5.0
-            Use :meth:`count_neighbors` instead.
-        """
-        msg = "Use ``count_neighbors(u, 'next_nearest_neighbors')`` instead."
-        warnings.warn(msg, FutureWarning)
-        return self.count_neighbors(u, 'next_nearest_neighbors')
-
     def distance(self, u1, u2, dx):
         """Get the distance for a given coupling between two sites in the lattice.
 
@@ -1003,7 +968,7 @@ class Lattice:
             is compatible with the shape/indexing required for
             :meth:`~tenpy.models.CouplingModel.add_coupling`.
             For example to add a Z-Z interaction of strength `J/r` with r the distance,
-            you can do something like this in :meth:`~tenpy.models.CoulingModel.init_terms`:
+            you can do something like this in :meth:`~tenpy.models.CouplingModel.init_terms`:
 
                 for u1, u2, dx in self.lat.pairs['nearest_neighbors']:
                     dist = self.lat.distance(u1, u2, dx)
@@ -1236,7 +1201,7 @@ class Lattice:
         -------
         mps_ijkl : 2D int array
             Each row contains MPS indices `i,j,k,l,...`` for each of the operators positions.
-            The positions are defined by `dx` (j,k,l,... relative to `i`) and boundary coundary
+            The positions are defined by `dx` (j,k,l,... relative to `i`) and boundary
             conditions of `self` (how much the `box` for given `dx` can be shifted around without
             hitting a boundary - these are the different rows).
         strength_vals : 1D array
@@ -1257,7 +1222,7 @@ class Lattice:
         Nops = len(ops)
         Ls = np.array(self.Ls)
         # make 3D arrays ["iteration over lattice", "operator", "spatial direction"]
-        # recall numpy broadcasing: 1D equivalent to [np.newaxis, np.newaxis, :]
+        # recall numpy broadcasting: 1D equivalent to [np.newaxis, np.newaxis, :]
         dx = np.array([op_dx for _, op_dx, op_u in ops], dtype=np.int_).reshape([1, Nops, D])
         u = np.array([op_u for _, op_dx, op_u in ops], dtype=np.int_).reshape([1, Nops, 1])
         coupling_shape, shift_lat_indices = self.multi_coupling_shape(dx[0, :, :])
@@ -1441,8 +1406,44 @@ class Lattice:
             vec = basis[i]
             ax.arrow(origin[0], origin[1], vec[0], vec[1], **kwargs)
 
+    def plot_reciprocal_basis(self, ax, origin=(0., 0.), plot_symmetric=True, **kwargs):
+        """Plot arrows indicating the basis vectors of the reciprocal lattice.
+
+        (Same as :meth:`plot_basis`, but without shading, since Brillouin zone is drawn separately)
+
+        Parameters
+        ----------
+        ax : :class:`matplotlib.axes.Axes`
+            The axes on which we should plot.
+        plot_symmetric : bool, default=True
+            if True, centers the plot around the origin
+        origin : iterable
+            coordinates of the origin
+        **kwargs :
+            Keyword arguments for ``ax.arrow``.
+        """
+        kwargs.setdefault("length_includes_head", True)
+        kwargs.setdefault("width", 0.05)
+        kwargs.setdefault("color", 'k')
+        origin = np.array(origin)
+        reciprocal_basis = self.reciprocal_basis
+        if reciprocal_basis.shape[1] == 1:
+            reciprocal_basis = reciprocal_basis * np.array([[1., 0]])
+            # change scaling in 1D
+            kwargs.setdefault("head_length", 20*kwargs.get("width"))
+            if reciprocal_basis.shape[1] != 2:
+                raise ValueError("can only plot in 2 dimensions.")
+        for i in range(self.dim):
+            vec = reciprocal_basis[i]
+            ax.arrow(origin[0], origin[1], vec[0], vec[1], **kwargs)
+        if plot_symmetric is True:
+            ylim = np.abs(ax.get_ylim()).max()
+            xlim = np.abs(ax.get_xlim()).max()
+            ax.set_ylim(-ylim, +ylim)
+            ax.set_xlim(-xlim, +xlim)
+
     def plot_bc_identified(self, ax, direction=-1, origin=None, cylinder_axis=False, **kwargs):
-        """Mark two sites indified by periodic boundary conditions.
+        """Mark two sites identified by periodic boundary conditions.
 
         Works only for lattice with a 2-dimensional basis.
 
@@ -1495,6 +1496,44 @@ class Lattice:
             kwargs['marker'] = None
             ax.plot(x_y_cyl[:, 0], x_y_cyl[:, 1], **kwargs)
 
+    def plot_brillouin_zone(self, ax, *args, **kwargs):
+        """Plot the Brillouin Zone of the lattice.
+
+        Parameters
+        ----------
+        ax : :class:`matplotlib.axes.Axes`
+            The axes on which we should plot.
+        *args :
+            arguments for :meth:`plot_brillouin_zone` of :class:``self.BZ.__class__``.
+        **kwargs :
+            Keyword arguments for :meth:`plot_brillouin_zone` of :class:``self.BZ.__class__``.
+        """
+        self.BZ.plot_brillouin_zone(ax, *args, **kwargs)
+
+    @property
+    def reciprocal_basis(self):
+        r"""Reciprocal basis vectors of the lattice.
+
+        The reciprocal basis vectors obey :math:`a_i b_j = 2 \pi \delta_{i, j}`, such that
+        ``b_j = reciprocal_basis[j]``
+        """
+        if self._reciprocal_basis is None:
+            if self.dim == 1:
+                self._reciprocal_basis = (2*np.pi/np.linalg.norm(self.basis)).reshape(1, 1)
+            else:
+                self._reciprocal_basis = (np.linalg.inv(self.basis)*2*np.pi).T
+        return self._reciprocal_basis
+
+    @property
+    def BZ(self):
+        """The Brillouin Zone as :class:`SimpleBZ`"""
+        if self._BZ is None:
+            try:
+                self._BZ = SimpleBZ.from_recip_basis_vectors(self.reciprocal_basis, self.dim)
+            except Exception:
+                raise ValueError("Couldn't create the Brillouin Zone")
+        return self._BZ
+
     def _asvalid_latidx(self, lat_idx):
         """convert lat_idx to an ndarray with correct last dimension."""
         lat_idx = np.asarray(lat_idx, dtype=np.intp)
@@ -1513,27 +1552,6 @@ class Lattice:
         for L in self.Ls:
             strides.append(strides[-1] * L)
         self._strides = np.array(strides, np.intp)
-
-    @property
-    def nearest_neighbors(self):
-        msg = ("Deprecated access with ``lattice.nearest_neighbors``.\n"
-               "Use ``lattice.pairs['nearest_neighbors']`` instead.")
-        warnings.warn(msg, FutureWarning)
-        return self.pairs['nearest_neighbors']
-
-    @property
-    def next_nearest_neighbors(self):
-        msg = ("Deprecated access with ``lattice.next_nearest_neighbors``.\n"
-               "Use ``lattice.pairs['next_nearest_neighbors']`` instead.")
-        warnings.warn(msg, FutureWarning)
-        return self.pairs['next_nearest_neighbors']
-
-    @property
-    def next_next_nearest_neighbors(self):
-        msg = ("Deprecated access with ``lattice.next_next_nearest_neighbors``.\n"
-               "Use ``lattice.pairs['next_next_nearest_neighbors']`` instead.")
-        warnings.warn(msg, FutureWarning)
-        return self.pairs['next_next_nearest_neighbors']
 
 
 class TrivialLattice(Lattice):
@@ -1557,7 +1575,7 @@ class TrivialLattice(Lattice):
 class SimpleLattice(Lattice):
     """A lattice with a unit cell consisting of just a single site.
 
-    In many cases, the unit cell consists just of a single site, such that the the last entry of
+    In many cases, the unit cell consists just of a single site, such that the last entry of
     `u` of an 'lattice index' can only be ``0``.
     From the point of internal algorithms, we handle this class like a :class:`Lattice` --
     in that way we don't need to distinguish special cases in the algorithms.
@@ -1575,7 +1593,7 @@ class SimpleLattice(Lattice):
         the lattice site. The `unit_cell` of the :class:`Lattice` is just ``[site]``.
     **kwargs :
         Additional keyword arguments given to the :class:`Lattice`.
-        If `order` is specified in the form ``('standard', snake_windingi, priority)``,
+        If `order` is specified in the form ``('standard', snake_winding, priority)``,
         the `snake_winding` and `priority` should only be specified for the spatial directions.
         Similarly, `positions` can be specified as a single vector.
     """
@@ -1600,7 +1618,6 @@ class SimpleLattice(Lattice):
 
 class MultiSpeciesLattice(Lattice):
     """A variant of a :class:`SimpleLattice` replacing the elementary site with a set of sites.
-
 
     An initialized  `MultiSpeciesLattice` replaces each site in the given `simple_lattice` with
     the `species_sites`. This is useful e.g. if you want to place spin-full fermions
@@ -1641,6 +1658,7 @@ class MultiSpeciesLattice(Lattice):
 
         from tenpy.models.lattice import *
         import tenpy
+        from copy import copy
 
     When defining the sites, you should probably call
     :func:`~tenpy.networks.site.set_common_charges` (see examples there!) to adjust the charges,
@@ -1650,7 +1668,7 @@ class MultiSpeciesLattice(Lattice):
 
         >>> simple_lat = Square(2, 3, None)
         >>> f = tenpy.networks.site.FermionSite(conserve='N')
-        >>> s = tenpy.networks.site.SpinHalfSite(conserve='Sz')
+        >>> s = tenpy.networks.site.SpinHalfSite(conserve='Sz', sort_charge=False)
         >>> tenpy.networks.site.set_common_charges([f, s], 'independent')
         [array([0, 1]), array([1, 0])]
         >>> fs_lat = MultiSpeciesLattice(simple_lat, [f, s], ['f', 's'])
@@ -1683,15 +1701,16 @@ class MultiSpeciesLattice(Lattice):
 
 
     Note that the "simple lattice" can also have a non-trivial unit cell itself, e.g.
-    the Honeycomb already has two sites in it's unit cell:
+    the Honeycomb already has two sites in its unit cell:
 
     .. doctest :: MultiSpeciesLattice
 
         >>> simple_lat = Honeycomb(2, 3, None)
         >>> f = tenpy.networks.site.FermionSite(conserve='N')
-        >>> tenpy.networks.site.set_common_charges([f, f], 'same')  # same = total N conserved
+        >>> sites = [f, copy(f)]
+        >>> tenpy.networks.site.set_common_charges(sites, 'same')  # same = total N conserved
         [array([0, 1]), array([0, 1])]
-        >>> spinfull_fermion_Honeycomb = MultiSpeciesLattice(simple_lat, [f, f], ['up', 'down'])
+        >>> spinful_fermion_Honeycomb = MultiSpeciesLattice(simple_lat, sites, ['up', 'down'])
 
     In this case, you could also call :func:`tenpy.networks.site.spin_half_species`.
     """
@@ -1853,7 +1872,7 @@ class IrregularLattice(Lattice):
         Each row is a lattice index ``(x_0, ..., x_{dim-1}, u)`` of a site to be removed.
         If ``None``, don't remove something.
     add : Tuple[2D array, list] | None
-        Each row of the 2D array is a lattice index ``(x_0, ..., x_{dim-1}, u)`` specifiying
+        Each row of the 2D array is a lattice index ``(x_0, ..., x_{dim-1}, u)`` specifying
         where a site is to be added; `u` is the index of the site within the final
         :attr:`unit_cell` of the irregular lattice.
         For each row of the 2D array, there is one entry in the list specifying where the site
@@ -1881,7 +1900,7 @@ class IrregularLattice(Lattice):
 
         from tenpy.models.lattice import *
 
-    Let's imagine that we have two different sites; for concreteness we can thing of a
+    Let's imagine that we have two different sites; for concreteness we can think of a
     fermion site, which we represent with ``'F'``, and a spin site ``'S'``.
     If you want to preserve charges, take a look at
     :func:`~tenpy.networks.site.set_common_charges` for the proper way to initialize the sites.
@@ -2324,6 +2343,7 @@ class HelicalLattice(Lattice):
         self.N_sites_per_ring = None  # shouldn't be used
         self.N_rings = None  # shouldn't be used - pointless for this case.
 
+
 class Chain(SimpleLattice):
     """A chain of L equal sites.
 
@@ -2368,7 +2388,7 @@ class Chain(SimpleLattice):
     Parameters
     ----------
     L : int
-        The lenght of the chain.
+        The length of the chain.
     site : :class:`~tenpy.networks.site.Site`
         The local lattice site. The `unit_cell` of the :class:`Lattice` is just ``[site]``.
     **kwargs :
@@ -2394,7 +2414,7 @@ class Chain(SimpleLattice):
             Just along the chain, ``0, 1, 2, 3, 4, ... ,L-1``.
         ``'folded'`` :
             Yields ``0, L-1, 1, L-2, ... , L//2``.
-            This order might be usefull if you want to consider a ring with periodic boundary
+            This order might be useful if you want to consider a ring with periodic boundary
             conditions with a finite MPS: if you squeeze this ring to a long oval and zig-zag
             through the top and bottom, you get this order.
             Thus, it avoids the ultra-long-range coupling from site 0 to L-1, at the expense of
@@ -2508,6 +2528,9 @@ class Ladder(Lattice):
         kwargs['pairs'].setdefault('leg_NN', [(0, 0, np.array([1])), (1, 1, np.array([1]))])
         kwargs['pairs'].setdefault('diagonal', nNN)
         Lattice.__init__(self, [L], sites, **kwargs)
+        # set reciprocal basis and BZ explicitly, since the basis vector is 2D for plotting
+        self._reciprocal_basis = np.array([[2*np.pi, 0]])
+        self._BZ = SimpleBZ.from_recip_basis_vectors(np.array([[2*np.pi]]), self.dim)
 
     def ordering(self, order):
         """Provide possible orderings of the `N` lattice sites.
@@ -2778,7 +2801,7 @@ class Triangular(SimpleLattice):
     **kwargs :
         Additional keyword arguments given to the :class:`Lattice`.
         `pairs` are set accordingly.
-        If `order` is specified in the form ``('standard', snake_windingi, priority)``,
+        If `order` is specified in the form ``('standard', snake_winding, priority)``,
         the `snake_winding` and `priority` should only be specified for the spatial directions.
         Similarly, `positions` can be specified as a single vector.
     """
@@ -2899,25 +2922,11 @@ class Honeycomb(Lattice):
                 priority = (0, 2, 1)
                 snake_winding = (False, False, False)
                 return get_order(self.shape, snake_winding, priority)
-            elif order == "snake" or order== "snake_rings":
+            elif order == "snake" or order == "snake_rings":
                 priority = (0, 2, 1)
                 snake_winding = (False, False, True)
                 return get_order(self.shape, snake_winding, priority)
         return super().ordering(order)
-
-    @property
-    def fourth_nearest_neighbors(self):
-        msg = ("Deprecated access with ``lattice.fourth_nearest_neighbors``.\n"
-               "Use ``lattice.pairs['fourth_nearest_neighbors']`` instead.")
-        warnings.warn(msg, FutureWarning)
-        return self.pairs['fourth_nearest_neighbors']
-
-    @property
-    def fifth_nearest_neighbors(self):
-        msg = ("Deprecated access with ``lattice.fifth_nearest_neighbors``.\n"
-               "Use ``lattice.pairs['fifth_nearest_neighbors']`` instead.")
-        warnings.warn(msg, FutureWarning)
-        return self.pairs['fifth_nearest_neighbors']
 
 
 class Kagome(Lattice):
@@ -3014,6 +3023,301 @@ class Kagome(Lattice):
         return super().ordering(order)
 
 
+class SimpleBZ:
+    r"""Helper class to provide an interface for the Brillouin Zone of a given lattice.
+
+    The Brillouin Zone is the Wigner-Seitz Cell of the reciprocal lattice. For a given lattice
+    with basis vectors :math:`a_i`, the reciprocal lattice is generated by the reciprocal
+    basis vectors :math:`b_i`, which obey :math:`a_i b_j = 2 \pi \delta_{i j}`.
+
+    Parameters
+    ----------
+    vertices : array_like
+        a list of the vertices of the 1st BZ with shape (N, d) where d is the dimension
+        and N the number of vertices.
+    basis : array_like
+        the reciprocal basis of the real space lattice, i.e. the basis in reciprocal space
+    dim : int
+        dimension of the Brillouin Zone
+    """
+    def __init__(self, vertices, basis, dim: int):
+        assert dim == 1 or dim == 2, 'SimpleBZ is only defined for dimensions 1 and 2'
+        self.dim = dim
+        self.basis = basis
+        self.vertices = self.order_vertices(vertices)
+        if self.dim == 2:
+            self.hull = ConvexHull(self.vertices)
+
+    def order_vertices(self, vertices):
+        vertices = np.array(vertices)
+        if self.dim == 1:
+            if len(vertices) != 2:
+                raise ValueError("For Brillouin Zones in 1D, there are only 2 vertices")
+            return np.sort(vertices)
+        else:
+            assert vertices.ndim == 2, "Pass vertices as list/array of points of x, y coordinates"
+            x_coords = vertices[:, 0]
+            y_coords = vertices[:, 1]
+            angles = np.arctan2(y_coords, x_coords)  # note that x and y coords are changed
+            angles += (angles < 0) * 2 * np.pi  # shift angle into interval [0, 2 pi]
+            return vertices[np.argsort(angles)]
+
+    @classmethod
+    def from_recip_basis_vectors(cls, basis_vectors, dim):
+        if dim == 1:
+            return cls._from_recip_basis_vectors_1d(basis_vectors)
+        elif dim == 2:
+            return cls._from_recip_basis_vectors_2d(basis_vectors)
+        else:
+            raise ValueError("Only dimensions 1 and 2 are supported")
+
+    @classmethod
+    def _from_recip_basis_vectors_1d(cls, basis_vector):
+        basis_vector = np.array(basis_vector).flatten()
+        if len(basis_vector) != 1:
+            raise ValueError("For Brillouin Zones in 1D, the basis vector must have dim 1")
+        vertices = np.array([-1, 1]) * basis_vector/2
+        return cls(vertices, basis_vector, dim=1)
+
+    @classmethod
+    def _from_recip_basis_vectors_2d(cls, basis, n_vecs_generated=30):
+        """Construct the Brillouin Zone in 2D from the lattices basis vectors.
+
+        Given a basis, consisting of two reciprocal basis vectors b1, b2; first perform a
+        Lagrange lattice reduction, ensuring the new basis will be reasonably orthogonal.
+        Second, compute the Voronoi diagram of a set of lattice points and return the vertices of the
+        Voronoi region including the origin. This will be the 1st Brillouin Zone.
+
+        Parameters
+        ----------
+        basis : array_like
+            basis of a lattice in reciprocal space, s.t. the basis vectors are ``b1 = basis[0]``,
+            ``b2 = basis[1]``
+        n_vecs_generated : int, default=30
+            number of lattice points to generate around the origin
+
+        Returns
+        -------
+        LatticeClass : :class:`SimpleBZ`
+            an instance of the :class:`SimpleBZ` instantiated from a list of points (vertices)
+            (in ordered counterclockwise direction) defining the BZ
+        """
+        # make sure given lattice basis is reasonable orthogonal and short
+        b1, b2 = cls.lagrange_lattice_reduction(basis)
+
+        # list of multiple of vectors
+        n_vecs_list = np.arange(-n_vecs_generated, n_vecs_generated + 1)
+        # generate lists of lattice points
+        b1_list = np.outer(n_vecs_list, b1)
+        b2_list = np.outer(n_vecs_list, b2)
+
+        # get all combinations of lattice points (around the origin)
+        # (corresponds to i*b1+j*b2, i,j in {-10, -9, ..., 9, 10})
+        lattice_points = b1_list[:, np.newaxis] + b2_list[np.newaxis, :]
+        lattice_points = lattice_points.reshape(-1, lattice_points.shape[-1])
+
+        vor = Voronoi(lattice_points)
+        # find index of the Voronoi region corresponding to the origin
+        idx_0 = np.argsort(np.linalg.norm(vor.points, axis=-1))[0]
+        assert np.allclose(vor.points[idx_0], np.array([0, 0])), "Origin is not included in Voronoi"
+        # get corresponding voronoi region
+        vor_region_point_0 = vor.point_region[idx_0]
+        vor_region_0 = vor.regions[vor_region_point_0]
+        vertices = vor.vertices[vor_region_0]
+        return cls(vertices, basis, dim=2)
+
+    @property
+    def area(self):
+        if self.dim == 2:
+            return self.hull.volume
+        else:
+            raise ValueError("The area of a Brillouin Zone is not defined in 1 dimension")
+
+    def contains_points(self, points) -> np.ndarray:
+        """Checks whether given points lie inside the 1st Brillouin Zone.
+
+        Parameters
+        ----------
+        points : array_like
+            points of shape (..., 2) for 2D or shape(...) for 1D that will be checked
+
+        Returns
+        -------
+        ndarray :
+            boolean array of shape ``points.shape[:-1]`` if 2D or points.shape if 1D, indicating
+            whether the corresponding point in ``points`` is contained in the Brillouin Zone
+        """
+        points = np.array(points).astype(float)  # accept also lists and tuples as input
+        if self.dim == 1:
+            in_1st_bz = np.logical_and(points >= self.vertices[0], points <= self.vertices[1])
+            return in_1st_bz
+        else:
+            # convert to expected shape
+            if points.ndim == 1:
+                points = points.reshape(1, -1)
+            assert points.shape[-1] == 2, "Points should be of dimension (..., 2)"
+            A = self.hull.equations[:, :-1]
+            b = self.hull.equations[:, -1]
+            # a point x = (x1, x2) is per definition
+            # (see qhull documentation: http://www.qhull.org/html/index.htm#definition)
+            # inside the hull, iff: A x + b <= [0, ...]
+            eps = 2*np.finfo(points.dtype).eps  # account for precision errors
+            return np.all((np.tensordot(points, A, (-1, -1)) + b) < eps, axis=-1)
+
+    def reduce_points(self, points):
+        """Bring a set of points into 1st Brillouin Zone.
+
+        This is done by applying multiples of the reciprocal basis vectors, for points that
+        lie outside the 1st Brillouin Zone.
+
+        Parameters
+        ----------
+        points : array_like
+            points to reduce given in the shape (..., 2) for 2D or (...) for 1D
+
+        Returns
+        -------
+        reduced_points : ndarray
+            of shape ``points.shape`` the array of the points now reduced to the 1st BZ
+        """
+        all_points = np.array(points).astype(float)
+        not_in_BZ = np.invert(self.contains_points(all_points))
+        points = all_points[not_in_BZ]
+
+        if self.dim == 1:
+            red_to_basis_vec = (points/self.basis) % 1
+            red_to_basis_vec[red_to_basis_vec > 0.5] -= 1
+            points = red_to_basis_vec*self.basis + self.vertices.mean()
+        else:
+            if points.ndim == 1:
+                points = points.reshape(1, -1)
+            assert points.shape[-1] == 2, "Points should be of dimension (N, 2)"
+
+            b1, b2 = self.basis
+            # basis transformation matrix
+            A = np.array([b1, b2]).T
+            # get points in transformed coordinates
+            points = np.tensordot(points, np.linalg.inv(A), (-1, -1))
+            # shift the points into the parallelogram spanned by b1 and b2
+            points = points % 1
+            # express points again in the standard basis
+            points = np.tensordot(points, A, (-1, -1))
+            #  get all points lying still outside the BZ
+            outside_bz = np.logical_not(self.contains_points(points))  # -> boolean array
+            points_outside_bz = points[outside_bz]  # -> shape (N_outside, 2)
+            # all possible translation vectors to reduced points from parallelogram to
+            # 1st BZ as matrix
+            translation_vecs = -1 * np.array([b1, b2, b1 + b2])
+            # get all  combinatorial results by applying translation_vecs to points_outside_bz
+            translated_point = points_outside_bz[..., np.newaxis, :] + translation_vecs
+            # reduce points
+            contains_translated_point = self.contains_points(translated_point)
+            reduced_points = translated_point[contains_translated_point]
+            # in case a point is ambiguous (could be reduced to two different points)
+            if reduced_points.shape != points_outside_bz.shape:
+                logger.warning("Some points could not be unambiguously reduced")
+                boolean_doubly_reduced = np.where(contains_translated_point.sum(axis=1) > 1)[0]
+                for row in boolean_doubly_reduced:
+                    indices = np.where(contains_translated_point[row])[0]  # -> indices where more than one True
+                    index = indices[0]  # by default, set last value to False
+                    contains_translated_point[row, index] = False
+                # overwrite reduced points (only select one of two)
+                reduced_points = translated_point[contains_translated_point]
+            # check that all points are reduced
+            if not np.all(self.contains_points(reduced_points)):
+                raise ValueError("Couldn't reduce points to 1st BZ!")
+            # overwrite points outside the BZ with their reduced form
+            points[outside_bz] = reduced_points
+        all_points[not_in_BZ] = points
+        return all_points
+
+    def plot_brillouin_zone(self, *args, **kwargs):
+        """Plot the brillouin zone of the lattice.
+
+        See :meth:`_plot_brillouin_zone_1d` and :meth:`_plot_brillouin_zone_2d`.
+        """
+        if self.dim == 1:
+            self._plot_brillouin_zone_1d(*args, **kwargs)
+        else:
+            self._plot_brillouin_zone_2d(*args, **kwargs)
+
+    def _plot_brillouin_zone_1d(self, ax, draw_points=True, **kwargs):
+        """Plot the brillouin zone of the lattice.
+
+        Parameters
+        ----------
+        ax : :class:`matplotlib.axes.Axes`
+            The axes on which we should plot.
+        draw_points: bool, default=True
+            draw edges of the polygon (BZ high symmetry points)
+        **kwargs :
+            Keyword arguments for ``matplotlib.axes.vlines``.
+        """
+        kwargs.setdefault("ls", "--")
+        kwargs.setdefault("color", "black")
+        if draw_points is True:
+            ax.plot(self.vertices, [0, 0], 'o')
+        ax.vlines(self.vertices, -0.5, 0.5, **kwargs)
+
+    def _plot_brillouin_zone_2d(self, ax, draw_points=True, autoscale=True, **kwargs):
+        """Plot the brillouin zone of the lattice.
+
+        Parameters
+        ----------
+        ax : :class:`matplotlib.axes.Axes`
+            The axes on which we should plot.
+        draw_points: bool, default=True
+            draw edges of the polygon (BZ high symmetry points)
+        autoscale : bool, default=True
+            call to :meth:`autoscale_view` of :class:`matplotlib.axes.Axes`
+        **kwargs :
+            Keyword arguments for ``matplotlib.patches.Polygon``.
+        """
+        from matplotlib.patches import Polygon
+        kwargs.setdefault("edgecolor", "black")
+        kwargs.setdefault("fill", False)
+        kwargs.setdefault("ls", "--")
+        # avoid drawing the polygon for 1 D
+        p = Polygon(self.vertices, **kwargs)
+        ax.add_patch(p)
+        if draw_points is True:
+            ax.plot(*self.vertices.T, 'o')
+        if autoscale is True:
+            ax.autoscale_view()
+
+    @staticmethod
+    def lagrange_lattice_reduction(basis):
+        r"""Short implementation of Lagrange's algorithm for 2D lattice reduction.
+
+        Parameters
+        ----------
+        basis : array_like
+            basis of a lattice in reciprocal space, s.t. the basis vectors are ``b1 = basis[0]``,
+            ``b2 = basis[1]``
+
+        Returns
+        -------
+        out : ndarray
+            the reduced basis. If :math:`\{i b_1 + j b_2 | i, j \in \mathbb{Z}\}` define a
+            lattice L,
+            the reduced basis vectors will generate the same lattice, albeit being the shortest
+            and "most orthogonal" ones to define the lattice
+        """
+        # shorthand to compute norm
+        norm = np.linalg.norm
+        # get basis vectors
+        u, v = basis
+        # assume norm(v) <= norm(u), otherwise swap them
+        if norm(v) > norm(u):
+            u, v = v, u
+        # subtract multiple of one basis vector from the other basis vector and swap them
+        while norm(v) < norm(u):
+            q = np.round(u.T @ (v / norm(v) ** 2))
+            r = u - q * v
+            u, v = v, r
+        return np.array([u, v])
+
+
 def get_lattice(lattice_name):
     """Given the name of a :class:`Lattice` class, get the lattice class itself.
 
@@ -3036,7 +3340,7 @@ def get_order(shape, snake_winding, priority=None):
     """Built the :attr:`Lattice.order` in (Snake-) C-Style for a given lattice shape.
 
     .. note ::
-        In this doc-string, the word 'direction' referst to a physical direction of the lattice
+        In this doc-string, the word 'direction' refers to a physical direction of the lattice
         or the index `u` of the unit cell as an "artificial direction".
 
     Parameters
@@ -3051,10 +3355,10 @@ def get_order(shape, snake_winding, priority=None):
         Otherwise, this defines the priority along which direction to wind first;
         the direction with the highest priority increases fastest.
         For example, "C-Style" order is enforced by ``priority=(0, 1, 2, ...)``,
-        and Fortrans F-style order is enforced by ``priority=(dim, dim-1, ..., 1, 0)``
+        and Fortran F-style order is enforced by ``priority=(dim, dim-1, ..., 1, 0)``
     group : ``None`` | tuple of tuple
         If ``None`` (default), ignore it.
-        Otherwise, it specifies that we group the fastests changing dimension
+        Otherwise, it specifies that we group the fastest changing dimension
 
     Returns
     -------
@@ -3115,7 +3419,7 @@ def get_order(shape, snake_winding, priority=None):
 def get_order_grouped(shape, groups, priority=None):
     """Variant of :func:`get_order`, grouping some sites of the unit cell.
 
-    This function is usefull for lattices with a unit cell of more than 2 sites (e.g. Kagome).
+    This function is useful for lattices with a unit cell of more than 2 sites (e.g. Kagome).
     For 2D lattices with a unit cell, the ordering goes
     first within a group , then along y,
     then the next group (for the same x-value), again along y,
@@ -3145,7 +3449,7 @@ def get_order_grouped(shape, groups, priority=None):
         plt.show()
 
     .. note ::
-        In this doc-string, the word 'direction' referst to a physical direction of the lattice
+        In this doc-string, the word 'direction' refers to a physical direction of the lattice
         or the index `u` of the unit cell as an "artificial direction".
 
     Parameters

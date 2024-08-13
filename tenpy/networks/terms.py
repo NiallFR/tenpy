@@ -5,7 +5,7 @@ acting on them. Each term is given by a collection of (onsite) operator names an
 sites it acts on. Moreover, we associate a `strength` to each term, which corresponds to the
 prefactor when specifying e.g. a Hamiltonian.
 """
-# Copyright 2019-2023 TeNPy Developers, GNU GPLv3
+# Copyright (C) TeNPy Developers, GNU GPLv3
 
 import numpy as np
 import warnings
@@ -74,7 +74,7 @@ class TermList(Hdf5Exportable):
         1.30000 * N_1
 
     If you have a :class:`~tenpy.models.lattice.Lattice`, you might also want to specify
-    the location of the operators by lattice indices insted of MPS indices.
+    the location of the operators by lattice indices instead of MPS indices.
     For example, you can obtain the nearest-neighbor density terms
     **without double counting each pair**) on a :class:`~tenpy.models.lattice.TriangularLattice`:
 
@@ -111,7 +111,7 @@ class TermList(Hdf5Exportable):
         terms : list of list of (str, tuple)
             List of terms, where each `term` is a tuple ``(opname, lat_idx)`` with
             `lat_idx` itself being a tuple ``(x, y, u)`` (for a 2D lattice) of the lattice
-            corrdinates.
+            coordinates.
         strengths : (list of) float/complex
             For each term in `terms` an associated prefactor or strength.
             A single number holds for all terms equally.
@@ -193,7 +193,12 @@ class TermList(Hdf5Exportable):
     def __str__(self):
         res = []
         for term, strength in self:
-            term_str = ' '.join(['{op!s}_{i:d}'.format(op=op, i=i) for op, i in term])
+            ops = []
+            for op, i in term:
+                if ' ' in op:
+                    op = '[' + op + ']'
+                ops.append(f"{op!s}_{i:d}")
+            term_str = ' '.join(ops)
             res.append('{s:.5f} * {t}'.format(s=strength, t=term_str))
         return ' +\n'.join(res)
 
@@ -349,6 +354,8 @@ class OnsiteTerms(Hdf5Exportable):
         for i, terms in enumerate(self.onsite_terms):
             for opname, strength in terms.items():
                 graph.add(i, 'IdL', 'IdR', opname, strength)
+        if graph.max_range is not None:
+            graph.max_range = max(graph.max_range, 1)
 
     def to_Arrays(self, sites):
         """Convert the :attr:`onsite_terms` into a list of np_conserved Arrays.
@@ -503,7 +510,7 @@ class CouplingTerms(Hdf5Exportable):
         Returns
         -------
         max_range : int
-            The maximum of ``j - i`` for the `i`, `j` occuring in a term of :attr:`coupling_terms`.
+            The maximum of ``j - i`` for the `i`, `j` occurring in a term of :attr:`coupling_terms`.
         """
         max_range = 0
         for i, d1 in self.coupling_terms.items():
@@ -641,7 +648,7 @@ class CouplingTerms(Hdf5Exportable):
                 style['color'] = hsv(norm_angle(np.angle(strength)))
                 return style
 
-        text_pos = np.array([1. - text_pos, text_pos], np.float_)
+        text_pos = np.array([1. - text_pos, text_pos], np.float64)
         for i in sorted(self.coupling_terms.keys()):
             d1 = self.coupling_terms[i]
             x_y[0, :] = pos[i]
@@ -702,7 +709,8 @@ class CouplingTerms(Hdf5Exportable):
                     label_j = graph.add_string_left_to_right(i, j, label, op_string)
                     for opname_j, strength in d3.items():
                         graph.add(j, label_j, 'IdR', opname_j, strength)
-        # done
+        if graph.max_range is not None:
+            graph.max_range = max(graph.max_range, self.max_range())
 
     def to_nn_bond_Arrays(self, sites):
         """Convert the :attr:`coupling_terms` into Arrays on nearest neighbor bonds.
@@ -853,7 +861,7 @@ class MultiCouplingTerms(CouplingTerms):
     an arbitrary recursion depth of the dictionary and build the
     :class:`~tenpy.networks.mpo.MPOGraph` simultaneously from the left and right.
     Doing this from both sides simultaneously is necessary to keep the scaling of the MPO bond
-    dimension optimial, which we try to acchieve by reusing states of the MPO graph as much as
+    dimension optimal, which we try to achieve by reusing states of the MPO graph as much as
     possible as follows.
 
     Each individual term gets split up at site `switchLR` (default: center of the coupling).
@@ -933,7 +941,7 @@ class MultiCouplingTerms(CouplingTerms):
         Returns
         -------
         max_range : int
-            The maximum of ``j - i`` for the `i`, `j` occuring in a term of :attr:`coupling_terms`.
+            The maximum of ``j - i`` for the `i`, `j` occurring in a term of :attr:`coupling_terms`.
         """
         return self._max_range
 
@@ -949,7 +957,7 @@ class MultiCouplingTerms(CouplingTerms):
             The MPS indices of the sites on which the operators acts. With ``i, j, k, ... = ijkl``,
             we require that they are ordered ascending, ``i < j < k < ...`` and
             that ``0 <= i < N_sites``.
-            Inidces >= N_sites indicate couplings between different unit cells of an infinite MPS.
+            Indices >= N_sites indicate couplings between different unit cells of an infinite MPS.
         ops_ijkl : list of str
             Names of the involved operators on sites ``i, j, k, ...``.
         op_string : (list of) str
@@ -961,7 +969,7 @@ class MultiCouplingTerms(CouplingTerms):
             coupling from the right for an efficient MPO representation.
             This has implications for the final MPO bond dimension, but the optimal value depends
             on what other terms there are in the Hamiltonian. We therefore provide a few
-            heurisitic choices that can be given as the following strings.
+            heuristic choices that can be given as the following strings.
 
             middle_i :
                 The overall middle index ``(ijkl[0] + ijkl[-1] + 1) // 2``, the default choice.
@@ -1150,7 +1158,8 @@ class MultiCouplingTerms(CouplingTerms):
                 continue
             switchLR, op_switch, shift, strength = connection
             graph.add(switchLR, keyL, keyR, op_switch, strength)
-        # done
+        if graph.max_range is not None:
+            graph.max_range = max(graph.max_range, self._max_range)
 
     def _insert_to_graph(self, graph, from_left):
         all_keys = [None] * len(self.connections)
@@ -1469,8 +1478,8 @@ class ExponentiallyDecayingTerms(Hdf5Exportable):
                     else:
                         graph.add(i, label, label, op_string, 1.)
                 graph.add(last_subsite, label, 'IdR', op_j, strength)
-
-        # done
+        if graph.max_range is not None:
+            graph.max_range = np.inf
 
     def to_TermList(self, cutoff=0.01, bc="finite"):
         """Convert self into a :class:`TermList`.

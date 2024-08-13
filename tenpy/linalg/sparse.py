@@ -2,12 +2,12 @@
 
 Some linear algebra algorithms, e.g. Lanczos, do not require the full representations of a linear
 operator, but only the action on a vector, i.e., a matrix-vector product `matvec`. Here we define
-the strucuture of such a general operator, :class:`NpcLinearOperator`, as it is used in our own
+the structure of such a general operator, :class:`NpcLinearOperator`, as it is used in our own
 implementations of these algorithms (e.g., :mod:`~tenpy.linalg.lanczos`). Moreover, the
 :class:`FlatLinearOperator` allows to use all the scipy sparse methods by providing functionality
 to convert flat numpy arrays to and from np_conserved arrays.
 """
-# Copyright 2018-2023 TeNPy Developers, GNU GPLv3
+# Copyright (C) TeNPy Developers, GNU GPLv3
 
 import numpy as np
 from . import np_conserved as npc
@@ -15,6 +15,7 @@ import scipy.sparse.linalg
 from scipy.sparse.linalg import LinearOperator as ScipyLinearOperator
 from ..tools.math import speigs, speigsh
 from ..tools.misc import argsort, group_by_degeneracy
+from . import krylov_based
 import warnings
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     'OrthogonalNpcLinearOperator',
     'FlatLinearOperator',
     'FlatHermitianOperator',
+    'BoostNpcLinearOperator'
 ]
 
 
@@ -139,7 +141,11 @@ class SumNpcLinearOperator(NpcLinearOperatorWrapper):
         self.other_operator = other_operator
 
     def matvec(self, vec):
-        return self.orig_operator.matvec(vec) + self.other_operator.matvec(vec)
+        if isinstance(vec, npc.Array):
+            return self.orig_operator.matvec(vec) + self.other_operator.matvec(vec)
+        else:
+            assert isinstance(vec, list)
+            return [a + b for a,b in zip(self.orig_operator.matvec(vec), self.other_operator.matvec(vec))]
 
     def to_matrix(self):
         return self.orig_operator.to_matrix() + self.other_operator.to_matrix()
@@ -149,7 +155,7 @@ class SumNpcLinearOperator(NpcLinearOperatorWrapper):
 
 
 class ShiftNpcLinearOperator(NpcLinearOperatorWrapper):
-    """Representes ``original_operator + shift * identity``.
+    """Represents ``original_operator + shift * identity``.
 
     This can be useful e.g. for better Lanczos convergence.
     """
@@ -160,7 +166,10 @@ class ShiftNpcLinearOperator(NpcLinearOperatorWrapper):
         self.shift = shift
 
     def matvec(self, vec):
-        return self.orig_operator.matvec(vec) + self.shift * vec
+        temp = self.orig_operator.matvec(vec)
+        krylov_based.iadd_prefactor_other(temp, self.shift, vec)
+        return temp
+        # return self.orig_operator.matvec(vec) + self.shift * vec
 
     def to_matrix(self):
         mat = self.orig_operator.to_matrix()
@@ -168,6 +177,34 @@ class ShiftNpcLinearOperator(NpcLinearOperatorWrapper):
 
     def adjoint(self):
         return ShiftNpcLinearOperator(self.orig_operator.adjoint(), np.conj(self.shift))
+
+
+class BoostNpcLinearOperator(NpcLinearOperatorWrapper):
+    """Represents ``original_operator + shift_i * |vec_i><vec_i|``.
+
+    This can be useful e.g. for better Lanczos convergence.
+    """
+    def __init__(self, orig_operator, boosts, boost_vecs):
+        assert len(boosts) == len(boost_vecs)
+        if len(boosts) == 0.:
+            warnings.warn("boost_vecs=[]: no need for BoostNpcLinearOperator", stacklevel=2)
+        super().__init__(orig_operator)
+        self.boosts = boosts
+        self.boost_vecs = boost_vecs
+
+    def matvec(self, vec):
+        temp = self.orig_operator.matvec(vec)
+        for b, bv in zip(self.boosts, self.boost_vecs):
+            krylov_based.iadd_prefactor_other(temp, b * npc.inner(bv, vec, axes='range', do_conj=True), bv)
+        return temp
+        # return self.orig_operator.matvec(vec) + self.shift * vec
+
+    def to_matrix(self):
+        mat = self.orig_operator.to_matrix()
+        return mat + self.shift * npc.eye_like(mat)
+
+    def adjoint(self):
+        return BoostNpcLinearOperator(self.orig_operator.adjoint(), np.conj(self.boosts), self.boost_vecs)
 
 
 class OrthogonalNpcLinearOperator(NpcLinearOperatorWrapper):
@@ -195,10 +232,14 @@ class OrthogonalNpcLinearOperator(NpcLinearOperatorWrapper):
         # equivalent to using H' = P H P where P is the projector (1-sum_o |o><o|)
         vec = vec.copy()
         for o in self.ortho_vecs:  # Project out
-            vec.iadd_prefactor_other(-npc.inner(o, vec, 'range', do_conj=True), o)
+            #for a, b in zip(vec, o):
+            #    a.iadd_prefactor_other(-npc.inner(b, a, axes='range', do_conj=True), b)
+            krylov_based.iadd_prefactor_other(vec, -npc.inner(o, vec, axes='range', do_conj=True), o)
         vec = self.orig_operator.matvec(vec)
         for o in self.ortho_vecs[::-1]:  # reverse: more obviously Hermitian.
-            vec.iadd_prefactor_other(-npc.inner(o, vec, 'range', do_conj=True), o)
+            #for a, b in zip(vec, o):
+            #    a.iadd_prefactor_other(-npc.inner(b, a, axes='range', do_conj=True), b)
+            krylov_based.iadd_prefactor_other(vec, -npc.inner(o, vec, axes='range', do_conj=True), o)
         return vec
 
     def to_matrix(self):
@@ -270,11 +311,11 @@ class FlatLinearOperator(ScipyLinearOperator):
     _compact_qdata : 2D array
         The `qdata` for the npc vector, in case `compact_flat` is True.
     _npc_matvec_multileg : function | None
-        Only set if initalized with :meth:`from_guess_with_pipe`.
+        Only set if initialized with :meth:`from_guess_with_pipe`.
         The `npc_matvec` function to be wrapped around. Takes the npc Array in multidimensional
         form and returns it that way.
     _labels_split : list of str
-        Only set if initalized with :meth:`from_guess_with_pipe`.
+        Only set if initialized with :meth:`from_guess_with_pipe`.
         Labels of the guess before combining them into a pipe (stored as `leg`).
     """
     def __init__(self, npc_matvec, leg, dtype, charge_sector=0, vec_label=None, compact_flat=None):
@@ -512,30 +553,6 @@ class FlatLinearOperator(ScipyLinearOperator):
                 res[leg.get_slice(qi)] = data.reshape((-1, ))
             return res
 
-    def flat_to_npc_all_sectors(self, vec):
-        """Convert flat vector of *all* charge sectors into npc Array with extra "charge" leg.
-
-        .. deprecated :: 0.7.3
-            This is merged into :meth:`flat_to_npc` with ``self.charge_sector = None``.
-
-        Parameters
-        ----------
-        vec : 1D ndarray
-            Numpy vector to be converted.
-
-        Returns
-        -------
-        npc_vec : :class:`~tenpy.linalg.np_conserved.Array`
-            Same as `vec`, but converted into a npc array.
-        """
-        assert self._charge_sector is None
-        warnings.warn(
-            "Deprecated access of FlatLinearOperator.flat_to_npc_all_sectors.\n"
-            "directly use flat_to_npc instead!",
-            category=FutureWarning,
-            stacklevel=2)
-        return self.flat_to_npc(vec)
-
     def flat_to_npc_None_sector(self, vec, cutoff=1.e-10):
         """Convert flat vector of undetermined charge sectors into npc Array.
 
@@ -554,30 +571,6 @@ class FlatLinearOperator(ScipyLinearOperator):
         """
         assert self._charge_sector is None
         return npc.Array.from_ndarray(vec, [self.leg], cutoff=cutoff, labels=[self.vec_label])
-
-    def npc_to_flat_all_sectors(self, npc_vec):
-        """Convert npc Array with qtotal = self.charge_sector into ndarray.
-
-        .. deprecated :: 0.7.3
-            This is merged into :meth:`npc_to_flat` with ``self.charge_sector = None``.
-
-        Parameters
-        ----------
-        npc_vec : :class:`~tenpy.linalg.np_conserved.Array`
-            Npc Array to be converted. Should only have entries in `self.charge_sector`.
-
-        Returns
-        -------
-        vec : 1D ndarray
-            Same as `npc_vec`, but converted into a flat Numpy array.
-        """
-        assert self._charge_sector is None
-        warnings.warn(
-            "Deprecated access of FlatLinearOperator.npc_to_flat_all_sectors.\n"
-            "directly use npc_to_flat instead!",
-            category=FutureWarning,
-            stacklevel=2)
-        return self.npc_to_flat(npc_vec)
 
     def _npc_matvec_wrapper(self, vec):
         """Wrapper around ``self._npc_matvec_multileg`` acting on a LegPipe.
@@ -632,7 +625,7 @@ class FlatLinearOperator(ScipyLinearOperator):
         num_ev : int
             Number of eigenvalues/vectors to look for.
         max_num_ev : int
-            :func:`scipy.sparse.linalg.speigs` somtimes raises a NoConvergenceError for small
+            :func:`scipy.sparse.linalg.speigs` sometimes raises a NoConvergenceError for small
             `num_ev`, which might be avoided by increasing `num_ev`. As a work-around,
             we try it again in the case of an error, just with larger `num_ev` up to `max_num_ev`.
             ``None`` defaults to ``num_ev + 2``.
@@ -679,7 +672,7 @@ class FlatLinearOperator(ScipyLinearOperator):
                 else:
                     eta, A = speigs(self, k=k, which=which, **kwargs)
                 break
-            except scipy.sparse.linalg.eigen.arpack.ArpackNoConvergence:
+            except scipy.sparse.linalg.ArpackNoConvergence:
                 if k == max_num_ev:
                     raise
             kwargs['tol'] = max(max_tol, kwargs.get('tol', 0))
@@ -697,7 +690,7 @@ class FlatLinearOperator(ScipyLinearOperator):
             # they can be arbitrarily rotated in degenerate subspaces.
             # To make things worse, we only have `k` of them which might cut a degenerate subspace
             # and we are not even aware of it.
-            # Luckily, within degenerat subspaces we know we can just project into a given charge
+            # Luckily, within degenerate subspaces we know we can just project into a given charge
             # sector, and get an (numerically) exact eigenstate of both charge and `self`!
             # The tricky thing is to ensure we have enough orthogonal states left!
 
